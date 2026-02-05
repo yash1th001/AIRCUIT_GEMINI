@@ -12,7 +12,7 @@ from typing import List, Dict, Any, Optional
 import uuid
 from datetime import datetime
 import json
-from emergentintegrations.llm.chat import LlmChat, UserMessage
+import google.generativeai as genai
 
 # Configure logging FIRST - before any other code
 logging.basicConfig(
@@ -63,7 +63,7 @@ class ResumeAnalysisRequest(BaseModel):
     resumeText: str
     jobDescription: Optional[str] = None
     geminiApiKey: Optional[str] = None  # User can provide their own key
-    useEmergentKey: bool = True  # Default to using Emergent LLM key
+    useEmergentKey: bool = True  # Deprecated, kept for compat, maps to Env Key
 
 class ResumeAnalysisResponse(BaseModel):
     atsScore: int
@@ -97,14 +97,13 @@ async def get_status_checks():
 @api_router.post("/analyze-resume")
 async def analyze_resume(request: ResumeAnalysisRequest):
     """
-    Analyze resume using Gemini AI via emergentintegrations.
-    Supports both Emergent LLM key and user-provided Gemini API keys.
+    Analyze resume using Google Gemini AI directly.
+    Supports environment GEMINI_API_KEY and user-provided keys.
     """
     try:
         logger.info("Received AI resume analysis request")
         logger.info(f"Resume length: {len(request.resumeText)} chars")
         logger.info(f"Has Job Description: {bool(request.jobDescription)}")
-        logger.info(f"Use Emergent Key: {request.useEmergentKey}")
         
         # Validate input
         if not request.resumeText or not request.resumeText.strip():
@@ -128,23 +127,30 @@ async def analyze_resume(request: ResumeAnalysisRequest):
         
         # Determine which API key to use
         api_key = None
-        if request.useEmergentKey:
-            api_key = os.environ.get('EMERGENT_LLM_KEY')
-            if not api_key:
-                raise HTTPException(
-                    status_code=500,
-                    detail="Emergent LLM key not configured on server"
-                )
-            logger.info("Using Emergent LLM key")
-        elif request.geminiApiKey:
+        if request.geminiApiKey and request.geminiApiKey.strip():
             api_key = request.geminiApiKey.strip()
             logger.info("Using user-provided Gemini API key")
         else:
-            raise HTTPException(
-                status_code=400,
-                detail="Either use Emergent key or provide your Gemini API key"
-            )
+            api_key = os.environ.get('GEMINI_API_KEY')
+        if not api_key:
+             # Fallback to check if EMERGENT_LLM_KEY is actually a Gemini Key (unlikely but possible)
+            fallback_key = os.environ.get('EMERGENT_LLM_KEY')
+            if fallback_key and not fallback_key.startswith('sk-emergent'):
+                 api_key = fallback_key
+            else:
+                raise HTTPException(
+                    status_code=500,
+                    detail="Server Gemini API key not configured. Please add GEMINI_API_KEY in backend/.env or provide it in the request."
+                )
+            logger.info("Using server environment API key")
         
+        # Security check: Ensure we aren't using the legacy Emergent key with Google Client
+        if api_key.startswith('sk-emergent'):
+             raise HTTPException(
+                status_code=400,
+                detail="The provided key is a legacy Emergent key. Please provide a valid Google Gemini API Key (starts with AIza...)."
+            )
+
         # Run the analysis pipeline
         result = await run_analysis_pipeline(
             api_key=api_key,
@@ -161,22 +167,22 @@ async def analyze_resume(request: ResumeAnalysisRequest):
         error_message = str(e)
         
         # Handle specific error types
-        if "INVALID_API_KEY" in error_message or "API_KEY_INVALID" in error_message:
-            raise HTTPException(
-                status_code=401,
-                detail="Invalid Gemini API key. Please check your API key and try again."
-            )
-        
-        if "API_KEY_FORBIDDEN" in error_message or "403" in error_message:
+        if "403" in error_message:
             raise HTTPException(
                 status_code=403,
-                detail="API key access denied. Make sure the Generative Language API is enabled in your Google Cloud Console."
+                detail="API key access denied. Make sure the API key is valid and Generative Language API is enabled."
             )
         
-        if "RATE_LIMITED" in error_message or "429" in error_message or "RESOURCE_EXHAUSTED" in error_message or "Quota exceeded" in error_message:
+        if "429" in error_message or "ResourceExhausted" in error_message:
             raise HTTPException(
                 status_code=429,
-                detail="Gemini API rate limit reached (Free Tier). Please wait a minute or add your own API Key in the settings."
+                detail="Gemini API rate limit reached. Please wait a minute or use a different API Key."
+            )
+            
+        if "404" in error_message and "models/" in error_message:
+             raise HTTPException(
+                status_code=404,
+                detail="The selected AI model is not available for your API key/region. Please try a different key."
             )
         
         if "JSON_PARSE_ERROR" in error_message:
@@ -192,213 +198,87 @@ async def analyze_resume(request: ResumeAnalysisRequest):
         )
 
 
+def get_model():
+    """Get the generative model optimized for free tier usage."""
+    # Using gemini-2.5-flash-lite for best performance and quota efficiency
+    # This is the newest lightweight model with excellent free tier support
+    return genai.GenerativeModel('gemini-2.5-flash-lite')
+
 async def run_analysis_pipeline(api_key: str, resume_text: str, job_description: Optional[str]) -> Dict[str, Any]:
     """
-    Run the complete resume analysis pipeline using Gemini via emergentintegrations.
+    Run the complete resume analysis pipeline using Google Gemini directly.
+    Optimized for free tier by reducing API calls from 4 to 1-2 calls.
     """
-    logger.info("=== Starting Resume Analysis Pipeline ===")
+    logger.info("=== Starting Resume Analysis Pipeline (Free Tier Optimized) ===")
     logger.info(f"JD provided: {bool(job_description)}")
     
+    # Configure GenAI
+    genai.configure(api_key=api_key)
+    
     try:
-        # Step 1: Extract resume data
-        logger.info("[Step 1] Extracting resume data...")
-        resume_data = await extract_resume_data(api_key, resume_text)
-        
-        # Step 2: Extract job requirements (if JD provided)
-        jd_data = None
-        gap_analysis = None
         if job_description:
-            logger.info("[Step 2] Extracting job requirements...")
-            jd_data = await extract_job_requirements(api_key, job_description)
-            
-            logger.info("[Step 3] Performing gap analysis...")
-            gap_analysis = await perform_gap_analysis(api_key, resume_data, jd_data)
-        
-        # Step 4: Generate final analysis
-        logger.info("[Step 4] Generating final analysis...")
-        final_analysis = await generate_final_analysis(
-            api_key, resume_text, job_description, resume_data, jd_data, gap_analysis
-        )
+            # OPTIMIZED: Single API call for complete analysis with JD
+            logger.info("[Optimized] Running complete analysis in single call...")
+            final_analysis = await analyze_with_job_description(resume_text, job_description)
+        else:
+            # OPTIMIZED: Single API call for resume-only analysis
+            logger.info("[Optimized] Running resume-only analysis...")
+            final_analysis = await analyze_without_job_description(resume_text)
         
         logger.info("=== Pipeline Complete ===")
         return final_analysis
         
     except Exception as e:
         logger.error(f"Pipeline error: {str(e)}", exc_info=True)
+        # Attempt to handle 404 model not found by suggesting checking key
+        if "404" in str(e) and "models/" in str(e):
+             logger.error("Model not found. This may be due to regional restrictions or invalid API key.")
         raise
 
 
-async def extract_resume_data(api_key: str, resume_text: str) -> Dict[str, Any]:
-    """Extract structured data from resume using Gemini."""
-    prompt = f"""You are a resume parser. Extract structured information from the following resume.
+async def analyze_with_job_description(resume_text: str, job_description: str) -> Dict[str, Any]:
+    """Complete analysis with job description in a single API call (Free tier optimized)."""
+    model = get_model()
+    
+    prompt = f"""You are an expert ATS analyst and career coach. Analyze this resume against the job description and provide comprehensive feedback.
 
 RESUME:
-{resume_text}
-
-Extract and return a JSON object with:
-{{
-  "candidateName": "<name or 'Not specified'>",
-  "currentRole": "<most recent job title>",
-  "yearsExperience": "<estimated total years>",
-  "skills": ["<skill1>", "<skill2>", ...],
-  "education": ["<degree1>", "<degree2>", ...],
-  "certifications": ["<cert1>", "<cert2>", ...],
-  "achievements": ["<quantified achievement1>", "<achievement2>", ...],
-  "summary": "<brief 2-sentence summary of the candidate>"
-}}
-
-Return ONLY valid JSON, no markdown."""
-    
-    try:
-        chat = LlmChat(
-            api_key=api_key,
-            session_id=f"resume_extract_{uuid.uuid4()}",
-            system_message="You are a precise data extractor. Return only valid JSON."
-        ).with_model("gemini", "gemini-2.0-flash")
-        
-        response = await chat.send_message(UserMessage(text=prompt))
-        
-        # Parse JSON response
-        return parse_json_response(response)
-    except Exception as e:
-        logger.error(f"Error extracting resume data: {str(e)}")
-        raise
-
-
-async def extract_job_requirements(api_key: str, job_description: str) -> Dict[str, Any]:
-    """Extract structured requirements from job description."""
-    prompt = f"""You are a job description parser. Extract structured requirements from the following job description.
+{resume_text[:8000]}
 
 JOB DESCRIPTION:
-{job_description}
+{job_description[:4000]}
 
-Extract and return a JSON object with:
+Perform a complete analysis and return a JSON object with:
+
+### Scoring (calculate precisely):
+- ATS Score (0-100): Based on contact info (15), summary (10), experience (15), education (10), skills (10), standard headings (10), plain text (10), action verbs (10), consistent dates (5), single column (5)
+- JD Match Score (0-100): Based on required skills (40), nice-to-have skills (15), experience years (15), certifications (20), keywords (10)
+- Structure Score (0-100): Based on clear headings (15), formatting (10), bullets (15), quantified achievements (15), length (10), white space (15), logical order (10), no typos (10)
+
+### Extract candidate info:
+- Name, current role, years of experience, top skills
+
+### Identify:
+- Strong matches with JD (specific)
+- Critical gaps from JD (specific)  
+- Quick wins (easy improvements)
+
+### Provide actionable suggestions:
+- Specific additions needed
+- What to remove
+- How to improve existing content
+
+### Section analysis:
+- For each section (Contact, Summary, Experience, Skills, Education, Certs): status (good/needs-improvement/missing) + specific feedback
+
+### Priority actions:
+- Top 3 most impactful changes with priority 1-3 and impact level
+
+Return ONLY valid JSON in this EXACT format:
 {{
-  "title": "<job title>",
-  "requiredYears": "<required years of experience>",
-  "mustHaveSkills": ["<required skill1>", "<required skill2>", ...],
-  "niceToHaveSkills": ["<optional skill1>", "<optional skill2>", ...],
-  "requiredCertifications": ["<cert1>", "<cert2>", ...],
-  "keyResponsibilities": ["<responsibility1>", "<responsibility2>", ...],
-  "industryKeywords": ["<keyword1>", "<keyword2>", ...]
-}}
-
-Return ONLY valid JSON, no markdown."""
-    
-    try:
-        chat = LlmChat(
-            api_key=api_key,
-            session_id=f"jd_extract_{uuid.uuid4()}",
-            system_message="You are a precise data extractor. Return only valid JSON."
-        ).with_model("gemini", "gemini-2.0-flash")
-        
-        response = await chat.send_message(UserMessage(text=prompt))
-        
-        return parse_json_response(response)
-    except Exception as e:
-        logger.error(f"Error extracting job requirements: {str(e)}")
-        raise
-
-
-async def perform_gap_analysis(api_key: str, resume_data: Dict, jd_data: Dict) -> Dict[str, Any]:
-    """Perform gap analysis between resume and job requirements."""
-    prompt = f"""You are a gap analysis expert. Compare the candidate's profile against job requirements.
-
-CANDIDATE PROFILE:
-{json.dumps(resume_data, indent=2)}
-
-JOB REQUIREMENTS:
-{json.dumps(jd_data, indent=2)}
-
-Identify gaps and return a JSON object:
-{{
-  "missingSkills": ["<skills from JD not in resume>"],
-  "underemphasizedSkills": ["<skills present but not highlighted enough>"],
-  "missingKeywords": ["<important JD keywords absent from resume>"],
-  "experienceGaps": ["<experience requirements not clearly met>"]
-}}
-
-Return ONLY valid JSON, no markdown."""
-    
-    try:
-        chat = LlmChat(
-            api_key=api_key,
-            session_id=f"gap_analysis_{uuid.uuid4()}",
-            system_message="You are a gap analysis expert. Return only valid JSON."
-        ).with_model("gemini", "gemini-2.0-flash")
-        
-        response = await chat.send_message(UserMessage(text=prompt))
-        
-        return parse_json_response(response)
-    except Exception as e:
-        logger.error(f"Error performing gap analysis: {str(e)}")
-        raise
-
-
-async def generate_final_analysis(
-    api_key: str,
-    resume_text: str,
-    job_description: Optional[str],
-    resume_data: Dict,
-    jd_data: Optional[Dict],
-    gap_analysis: Optional[Dict]
-) -> Dict[str, Any]:
-    """Generate comprehensive final analysis."""
-    
-    if job_description and jd_data and gap_analysis:
-        prompt = f"""You are an expert ATS analyst and career coach providing personalized resume feedback.
-
-## EXTRACTED CANDIDATE DATA:
-{json.dumps(resume_data, indent=2)}
-
-## EXTRACTED JOB REQUIREMENTS:
-{json.dumps(jd_data, indent=2)}
-
-## GAP ANALYSIS RESULTS:
-{json.dumps(gap_analysis, indent=2)}
-
-## ORIGINAL RESUME TEXT:
-{resume_text[:5000]}
-
-## ORIGINAL JOB DESCRIPTION:
-{job_description[:3000]}
-
-Generate a comprehensive analysis following these scoring rubrics:
-
-### ATS Score (0-100) - Calculate based on:
-- Contact info (email, phone, location): 15 points
-- Professional summary: 10 points
-- Work experience section: 15 points
-- Education section: 10 points
-- Skills section: 10 points
-- Standard headings: 10 points
-- Plain text format: 10 points
-- Action verbs: 10 points
-- Consistent dates: 5 points
-- Single column: 5 points
-
-### JD Match Score (0-100) - Calculate based on:
-- Required skills match: 40 points
-- Nice-to-have skills: 15 points
-- Years of experience: 15 points
-- Certifications: 20 points
-- Industry keywords: 10 points
-
-### Structure Score (0-100) - Calculate based on:
-- Clear section headings: 15 points
-- Consistent formatting: 10 points
-- Bullet points: 15 points
-- Quantified achievements: 15 points
-- Proper length: 10 points
-- White space: 15 points
-- Logical order: 10 points
-- No typos: 10 points
-
-Return ONLY valid JSON in this exact format:
-{{
-  "atsScore": <number 0-100>,
-  "jdMatchScore": <number 0-100>,
-  "structureScore": <number 0-100>,
+  "atsScore": <number>,
+  "jdMatchScore": <number>,
+  "structureScore": <number>,
   "hasJobDescription": true,
   "candidateContext": {{
     "name": "<name>",
@@ -407,79 +287,8 @@ Return ONLY valid JSON in this exact format:
     "topSkills": ["<skill1>", "<skill2>", "<skill3>"]
   }},
   "keyFindings": {{
-    "strongMatches": ["<specific match with JD>"],
-    "criticalGaps": ["<specific gap from JD>"],
-    "quickWins": ["<easy improvement>"]
-  }},
-  "suggestions": {{
-    "additions": ["<specific addition suggestion>"],
-    "removals": ["<specific removal suggestion>"],
-    "improvements": ["<specific improvement suggestion>"]
-  }},
-  "structureAnalysis": {{
-    "sections": [
-      {{"name": "Contact Information", "status": "good|needs-improvement|missing", "feedback": "<specific feedback>"}},
-      {{"name": "Professional Summary", "status": "good|needs-improvement|missing", "feedback": "<specific feedback>"}},
-      {{"name": "Work Experience", "status": "good|needs-improvement|missing", "feedback": "<specific feedback>"}},
-      {{"name": "Skills", "status": "good|needs-improvement|missing", "feedback": "<specific feedback>"}},
-      {{"name": "Education", "status": "good|needs-improvement|missing", "feedback": "<specific feedback>"}},
-      {{"name": "Certifications", "status": "good|needs-improvement|missing", "feedback": "<specific feedback>"}}
-    ],
-    "formatting": ["<specific formatting recommendation>"]
-  }},
-  "priorityActions": [
-    {{"priority": 1, "action": "<most impactful change>", "impact": "high"}},
-    {{"priority": 2, "action": "<second most impactful>", "impact": "medium"}},
-    {{"priority": 3, "action": "<third most impactful>", "impact": "low"}}
-  ]
-}}"""
-    else:
-        prompt = f"""You are an expert ATS analyst providing personalized resume feedback.
-
-## EXTRACTED CANDIDATE DATA:
-{json.dumps(resume_data, indent=2)}
-
-## ORIGINAL RESUME TEXT:
-{resume_text[:5000]}
-
-Generate a comprehensive ATS and structure analysis (NO job description provided).
-
-### ATS Score (0-100) - Calculate based on:
-- Contact info: 15 points
-- Professional summary: 10 points
-- Work experience: 15 points
-- Education: 10 points
-- Skills: 10 points
-- Standard headings: 10 points
-- Plain text: 10 points
-- Action verbs: 10 points
-- Consistent dates: 5 points
-- Single column: 5 points
-
-### Structure Score (0-100) - Calculate based on:
-- Clear headings: 15 points
-- Consistent formatting: 10 points
-- Bullet points: 15 points
-- Quantified achievements: 15 points
-- Proper length: 10 points
-- White space: 15 points
-- Logical order: 10 points
-- No typos: 10 points
-
-Return ONLY valid JSON in this exact format:
-{{
-  "atsScore": <number 0-100>,
-  "structureScore": <number 0-100>,
-  "hasJobDescription": false,
-  "candidateContext": {{
-    "name": "<name>",
-    "currentRole": "<role>",
-    "yearsExperience": "<years>",
-    "topSkills": ["<skill1>", "<skill2>", "<skill3>"]
-  }},
-  "keyFindings": {{
-    "strongMatches": ["<strong point in resume>"],
-    "criticalGaps": ["<area needing improvement>"],
+    "strongMatches": ["<specific match>"],
+    "criticalGaps": ["<specific gap>"],
     "quickWins": ["<easy fix>"]
   }},
   "suggestions": {{
@@ -496,28 +305,105 @@ Return ONLY valid JSON in this exact format:
       {{"name": "Education", "status": "good|needs-improvement|missing", "feedback": "<specific>"}},
       {{"name": "Certifications", "status": "good|needs-improvement|missing", "feedback": "<specific>"}}
     ],
-    "formatting": ["<specific recommendation>"]
+    "formatting": ["<recommendation>"]
   }},
   "priorityActions": [
     {{"priority": 1, "action": "<most impactful>", "impact": "high"}},
-    {{"priority": 2, "action": "<second most impactful>", "impact": "medium"}},
-    {{"priority": 3, "action": "<third most impactful>", "impact": "low"}}
+    {{"priority": 2, "action": "<second>", "impact": "medium"}},
+    {{"priority": 3, "action": "<third>", "impact": "low"}}
   ]
 }}"""
-    
+
     try:
-        chat = LlmChat(
-            api_key=api_key,
-            session_id=f"final_analysis_{uuid.uuid4()}",
-            system_message="You are an expert ATS analyst. Return only valid JSON matching the exact schema specified."
-        ).with_model("gemini", "gemini-2.0-flash")
-        
-        response = await chat.send_message(UserMessage(text=prompt))
-        
-        return parse_json_response(response)
+        response = await model.generate_content_async(prompt)
+        return parse_json_response(response.text)
     except Exception as e:
-        logger.error(f"Error generating final analysis: {str(e)}")
+        logger.error(f"Error in complete analysis: {str(e)}")
         raise
+
+
+async def analyze_without_job_description(resume_text: str) -> Dict[str, Any]:
+    """Resume-only analysis in a single API call (Free tier optimized)."""
+    model = get_model()
+    
+    prompt = f"""You are an expert ATS analyst. Analyze this resume and provide comprehensive feedback.
+
+RESUME:
+{resume_text[:10000]}
+
+Perform a complete ATS and structure analysis (NO job description provided).
+
+### Scoring (calculate precisely):
+- ATS Score (0-100): Based on contact info (15), summary (10), experience (15), education (10), skills (10), standard headings (10), plain text (10), action verbs (10), consistent dates (5), single column (5)
+- Structure Score (0-100): Based on clear headings (15), formatting (10), bullets (15), quantified achievements (15), length (10), white space (15), logical order (10), no typos (10)
+
+### Extract:
+- Name, current role, years of experience, top 3 skills
+
+### Identify:
+- Strong points in resume
+- Areas needing improvement
+- Quick fixes
+
+### Provide suggestions:
+- Specific additions
+- What to remove  
+- Improvements needed
+
+### Section analysis:
+- For each section (Contact, Summary, Experience, Skills, Education, Certs): status + specific feedback
+
+### Priority actions:
+- Top 3 most impactful changes
+
+Return ONLY valid JSON in this EXACT format:
+{{
+  "atsScore": <number>,
+  "structureScore": <number>,
+  "hasJobDescription": false,
+  "candidateContext": {{
+    "name": "<name>",
+    "currentRole": "<role>",
+    "yearsExperience": "<years>",
+    "topSkills": ["<skill1>", "<skill2>", "<skill3>"]
+  }},
+  "keyFindings": {{
+    "strongMatches": ["<strong point>"],
+    "criticalGaps": ["<improvement area>"],
+    "quickWins": ["<easy fix>"]
+  }},
+  "suggestions": {{
+    "additions": ["<specific>"],
+    "removals": ["<specific>"],
+    "improvements": ["<specific>"]
+  }},
+  "structureAnalysis": {{
+    "sections": [
+      {{"name": "Contact Information", "status": "good|needs-improvement|missing", "feedback": "<specific>"}},
+      {{"name": "Professional Summary", "status": "good|needs-improvement|missing", "feedback": "<specific>"}},
+      {{"name": "Work Experience", "status": "good|needs-improvement|missing", "feedback": "<specific>"}},
+      {{"name": "Skills", "status": "good|needs-improvement|missing", "feedback": "<specific>"}},
+      {{"name": "Education", "status": "good|needs-improvement|missing", "feedback": "<specific>"}},
+      {{"name": "Certifications", "status": "good|needs-improvement|missing", "feedback": "<specific>"}}
+    ],
+    "formatting": ["<recommendation>"]
+  }},
+  "priorityActions": [
+    {{"priority": 1, "action": "<most impactful>", "impact": "high"}},
+    {{"priority": 2, "action": "<second>", "impact": "medium"}},
+    {{"priority": 3, "action": "<third>", "impact": "low"}}
+  ]
+}}"""
+
+    try:
+        response = await model.generate_content_async(prompt)
+        return parse_json_response(response.text)
+    except Exception as e:
+        logger.error(f"Error in resume-only analysis: {str(e)}")
+        raise
+
+
+# Legacy functions removed - replaced with optimized single-call functions above
 
 
 def parse_json_response(content: str) -> Dict[str, Any]:
