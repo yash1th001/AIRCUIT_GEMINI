@@ -63,7 +63,6 @@ class ResumeAnalysisRequest(BaseModel):
     resumeText: str
     jobDescription: Optional[str] = None
     geminiApiKey: Optional[str] = None  # User can provide their own key
-    useEmergentKey: bool = True  # Deprecated, kept for compat, maps to Env Key
 
 class ResumeAnalysisResponse(BaseModel):
     atsScore: int
@@ -132,24 +131,13 @@ async def analyze_resume(request: ResumeAnalysisRequest):
             logger.info("Using user-provided Gemini API key")
         else:
             api_key = os.environ.get('GEMINI_API_KEY')
-        if not api_key:
-             # Fallback to check if EMERGENT_LLM_KEY is actually a Gemini Key (unlikely but possible)
-            fallback_key = os.environ.get('EMERGENT_LLM_KEY')
-            if fallback_key and not fallback_key.startswith('sk-emergent'):
-                 api_key = fallback_key
-            else:
-                raise HTTPException(
-                    status_code=500,
-                    detail="Server Gemini API key not configured. Please add GEMINI_API_KEY in backend/.env or provide it in the request."
-                )
-            logger.info("Using server environment API key")
         
-        # Security check: Ensure we aren't using the legacy Emergent key with Google Client
-        if api_key.startswith('sk-emergent'):
-             raise HTTPException(
-                status_code=400,
-                detail="The provided key is a legacy Emergent key. Please provide a valid Google Gemini API Key (starts with AIza...)."
+        if not api_key:
+            raise HTTPException(
+                status_code=500,
+                detail="Server Gemini API key not configured. Please add GEMINI_API_KEY in backend/.env or provide it in the request."
             )
+        logger.info("Using server environment API key")
 
         # Run the analysis pipeline
         result = await run_analysis_pipeline(

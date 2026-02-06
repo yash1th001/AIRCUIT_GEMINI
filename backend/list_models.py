@@ -4,7 +4,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-api_key = os.environ.get('GEMINI_API_KEY') or os.environ.get('EMERGENT_LLM_KEY')
+api_key = os.environ.get('GEMINI_API_KEY')
 print(f"Using API Key: {api_key[:5]}...")
 
 try:

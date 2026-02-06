@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -16,10 +16,19 @@ import { toast } from "@/hooks/use-toast";
 interface AuthModalProps {
   isOpen: boolean;
   onClose: () => void;
+  defaultView?: "login" | "signup";
 }
 
-const AuthModal = ({ isOpen, onClose }: AuthModalProps) => {
-  const [isLogin, setIsLogin] = useState(true);
+const AuthModal = ({ isOpen, onClose, defaultView = "login" }: AuthModalProps) => {
+  const [isLogin, setIsLogin] = useState(defaultView === "login");
+
+  // Reset state when modal opens or defaultView changes
+  useEffect(() => {
+    if (isOpen) {
+      setIsLogin(defaultView === "login");
+    }
+  }, [isOpen, defaultView]);
+
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);

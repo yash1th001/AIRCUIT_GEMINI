@@ -39,11 +39,6 @@ source venv/bin/activate  # On Windows: venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-#### Install emergentintegrations (for AI features)
-
-```bash
-pip install emergentintegrations --extra-index-url https://d33sy5i8bnduwe.cloudfront.net/simple/
-```
 
 #### Configure Backend Environment
 
@@ -65,11 +60,7 @@ DB_NAME=resume_analyzer_db
 # CORS Configuration
 CORS_ORIGINS=http://localhost:3000,http://127.0.0.1:3000
 
-# AI Integration (Emergent LLM Key - for AI features)
-EMERGENT_LLM_KEY=sk-emergent-0984aD5617aB265E3A
-```
-
-**Note:** The `EMERGENT_LLM_KEY` provided above is a universal key that works with OpenAI, Anthropic, and Gemini. If you want to use your own Gemini API key, you can add it through the app's UI.
+**Note:** If you want to use your own Gemini API key, you can configure `GEMINI_API_KEY` in `backend/.env` or add it through the app's UI.
 
 ### 3. Frontend Setup
 
@@ -106,28 +97,55 @@ WDS_SOCKET_PORT=0
 ENABLE_HEALTH_CHECK=false
 ```
 
-### 4. Start MongoDB
+### 4. Manage MongoDB Process
+Ensure MongoDB is running as a background service.
 
-Ensure MongoDB is running on your local machine:
+#### Windows
+```powershell
+# Start MongoDB Service
+net start MongoDB
 
+# Stop MongoDB Service
+net stop MongoDB
+
+# If not installed as a service, run directly:
+"C:\Program Files\MongoDB\Server\7.0\bin\mongod.exe" --dbpath="c:\data\db"
+```
+
+#### macOS (Homebrew)
 ```bash
-# For macOS (using Homebrew):
+# Start Service
 brew services start mongodb-community
 
-# For Ubuntu/Linux:
+# Stop Service
+brew services stop mongodb-community
+```
+
+#### Linux (Ubuntu)
+```bash
+# Start Service
 sudo systemctl start mongod
 
-# For Windows:
-# Start MongoDB from the Services app or run mongod.exe
+# Stop Service
+sudo systemctl stop mongod
 ```
 
-Verify MongoDB is running:
-
+Verify connection:
 ```bash
-mongosh  # Should connect to mongodb://localhost:27017
+mongosh
 ```
 
-### 5. Run the Application
+### 5. Connect with MongoDB Compass (GUI)
+To visualize your data, use MongoDB Compass:
+
+1. **Download & Install:** [MongoDB Compass](https://www.mongodb.com/try/download/compass)
+2. **Open Compass:** Launch the application.
+3. **New Connection:**
+   - **URI:** `mongodb://localhost:27017`
+   - Click **Connect**
+4. **Verify Database:** You should see `resume_analyzer_db` in the left sidebar once the app creates data.
+
+### 6. Run the Application
 
 You'll need **three terminal windows**:
 
@@ -169,7 +187,7 @@ tail -f backend/logs/app.log
 tail -f /usr/local/var/log/mongodb/mongo.log
 ```
 
-### 6. Access the Application
+### 7. Access the Application
 
 Open your browser and navigate to:
 
@@ -183,7 +201,7 @@ http://localhost:3000
 
 ### Using Your Own Gemini API Key (Optional)
 
-The app works out-of-the-box with the Emergent universal key. However, if you want to use your own Gemini API key:
+The app works with the Google Gemini API. To use your own key:
 
 1. Get a free API key from [Google AI Studio](https://makersuite.google.com/app/apikey)
 2. In the app, navigate to Settings → Profile
@@ -200,7 +218,7 @@ The app works out-of-the-box with the Emergent universal key. However, if you wa
 | `MONGO_URL` | MongoDB connection string | `mongodb://localhost:27017` |
 | `DB_NAME` | Database name | `resume_analyzer_db` |
 | `CORS_ORIGINS` | Allowed CORS origins | `*` |
-| `EMERGENT_LLM_KEY` | Universal AI key | Provided |
+| `GEMINI_API_KEY` | Google Gemini API Key | Required |
 
 #### Frontend (`frontend/.env`)
 
@@ -230,7 +248,6 @@ curl -X POST http://localhost:8001/api/analyze-resume \
   -d '{
     "resumeText": "John Doe\nEmail: john@example.com\nPhone: 555-1234\n\nExperience:\nSoftware Engineer at Tech Corp (2020-2023)\n- Developed web applications using React\n- Led team of 3 developers\n\nEducation:\nBS Computer Science (2020)\n\nSkills: JavaScript, Python, React",
     "jobDescription": null,
-    "useEmergentKey": true
   }'
 ```
 
@@ -257,14 +274,6 @@ sudo systemctl start mongod            # Linux
 # Or start mongod.exe manually on Windows
 ```
 
-### Backend Not Starting
-
-**Error:** `ModuleNotFoundError: No module named 'emergentintegrations'`
-
-**Solution:**
-```bash
-pip install emergentintegrations --extra-index-url https://d33sy5i8bnduwe.cloudfront.net/simple/
-```
 
 ### Frontend Build Errors
 
@@ -292,14 +301,14 @@ yarn install
 
 **Solutions:**
 
-1. **Check Emergent LLM Key:** Verify `EMERGENT_LLM_KEY` is set in `backend/.env`
+1. **Check API Key:** Verify `GEMINI_API_KEY` is set in `backend/.env`
 
 2. **Check Backend Logs:**
    ```bash
-   tail -f /var/log/supervisor/backend.*.log
+   tail -f backend/logs/app.log
    ```
 
-3. **Try with your own Gemini key:** Get a free key from [Google AI Studio](https://makersuite.google.com/app/apikey)
+3. **Verify Key Quota:** Ensure your Google AI Studio key has quota available.
 
 ### Port Already in Use
 

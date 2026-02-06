@@ -15,6 +15,7 @@ import ProfileSettingsDialog from "@/components/profile/ProfileSettingsDialog";
 const UserMenu = () => {
   const { user, isLoading, signOut } = useAuth();
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const [authView, setAuthView] = useState<"login" | "signup">("login");
 
   if (isLoading) {
     return (
@@ -27,13 +28,25 @@ const UserMenu = () => {
   if (!user) {
     return (
       <>
-        <Button variant="outline" onClick={() => setIsAuthModalOpen(true)}>
-          <User className="h-4 w-4 mr-2" />
-          Sign In
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="ghost" onClick={() => {
+            setAuthView("login");
+            setIsAuthModalOpen(true);
+          }}>
+            <User className="h-4 w-4 mr-2" />
+            Sign In
+          </Button>
+          <Button onClick={() => {
+            setAuthView("signup");
+            setIsAuthModalOpen(true);
+          }}>
+            Sign Up
+          </Button>
+        </div>
         <AuthModal
           isOpen={isAuthModalOpen}
           onClose={() => setIsAuthModalOpen(false)}
+          defaultView={authView}
         />
       </>
     );
