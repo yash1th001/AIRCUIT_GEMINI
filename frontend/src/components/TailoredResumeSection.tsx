@@ -1,9 +1,8 @@
 import { useState } from "react";
-import { FileEdit, Loader2, Copy, Check, Download, FileText, Trophy, Target, LayoutGrid } from "lucide-react";
+import { FileEdit, Loader2, Copy, Check, Download, FileText, Trophy, Target, LayoutGrid, Lightbulb, Plus, ArrowUp } from "lucide-react";
 import { Button } from "./ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { toast } from "@/hooks/use-toast";
-import { supabase } from "@/integrations/supabase/client";
 import { AnalysisResult } from "./AnalyzerSection";
 import { generateResumePdf } from "@/lib/resumePdfGenerator";
 
@@ -21,61 +20,39 @@ interface ResumeScores {
 }
 
 const TailoredResumeSection = ({ resumeText, jobDescription, results }: TailoredResumeSectionProps) => {
-  const [tailoredResume, setTailoredResume] = useState<string | null>(null);
+  const [isReady, setIsReady] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [copied, setCopied] = useState(false);
   const [scores, setScores] = useState<ResumeScores | null>(null);
+
+  // The clean resume text is always the original — used for PDF/TXT export
+  const cleanResumeText = resumeText.trim();
 
   const handleGenerateTailoredResume = async () => {
     setIsGenerating(true);
     setScores(null);
     try {
       toast({
-        title: "Tailoring Your Resume",
-        description: "Applying suggestions and validating the result...",
+        title: "Preparing Your Resume",
+        description: "Formatting your resume for export...",
       });
 
-      const allSuggestions = [
-        ...results.suggestions.additions,
-        ...results.suggestions.improvements,
-      ];
-
-      const { data, error } = await supabase.functions.invoke('generate-improved-resume', {
-        body: {
-          resumeText,
-          jobDescription: jobDescription.trim() || null,
-          suggestions: allSuggestions,
-          structureAnalysis: results.structureAnalysis,
-          preserveStructure: true,
-        },
+      setScores({
+        atsScore: results.atsScore,
+        jdMatchScore: results.jdMatchScore,
+        structureScore: results.structureScore,
       });
+      setIsReady(true);
 
-      if (error) {
-        throw new Error(error.message || "Failed to generate tailored resume");
-      }
-
-      if (!data?.improvedResume) {
-        throw new Error("No tailored resume content received");
-      }
-
-      setTailoredResume(data.improvedResume);
-      
-      // Set scores if available
-      if (data.scores) {
-        setScores(data.scores);
-      }
-      
       toast({
-        title: "Resume Tailored!",
-        description: data.scores 
-          ? `Your resume scored ${data.scores.atsScore}% ATS compatibility.`
-          : "Your resume has been updated with all suggestions applied.",
+        title: "Resume Ready!",
+        description: "Your resume is ready for export as a professionally formatted PDF.",
       });
     } catch (error) {
-      console.error("Failed to generate tailored resume:", error);
+      console.error("Failed to prepare resume:", error);
       toast({
-        title: "Generation Failed",
-        description: error instanceof Error ? error.message : "Failed to generate tailored resume. Please try again.",
+        title: "Preparation Failed",
+        description: error instanceof Error ? error.message : "Failed to prepare resume. Please try again.",
         variant: "destructive",
       });
     } finally {
@@ -84,14 +61,12 @@ const TailoredResumeSection = ({ resumeText, jobDescription, results }: Tailored
   };
 
   const handleCopy = async () => {
-    if (!tailoredResume) return;
-    
     try {
-      await navigator.clipboard.writeText(tailoredResume);
+      await navigator.clipboard.writeText(cleanResumeText);
       setCopied(true);
       toast({
         title: "Copied!",
-        description: "Tailored resume copied to clipboard.",
+        description: "Resume text copied to clipboard.",
       });
       setTimeout(() => setCopied(false), 2000);
     } catch (error) {
@@ -104,25 +79,16 @@ const TailoredResumeSection = ({ resumeText, jobDescription, results }: Tailored
   };
 
   const handleDownloadTxt = () => {
-    if (!tailoredResume) return;
-    
     try {
-      // Clean up the resume text for download
-      const cleanedResume = tailoredResume
-        .replace(/^[=\-]{3,}$/gm, '') // Remove separator lines
-        .replace(/\n{3,}/g, '\n\n') // Reduce excessive newlines
-        .trim();
-      
-      const blob = new Blob([cleanedResume], { type: 'text/plain;charset=utf-8' });
+      const blob = new Blob([cleanResumeText], { type: 'text/plain;charset=utf-8' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = 'tailored-resume.txt';
+      a.download = 'resume.txt';
       a.style.display = 'none';
       document.body.appendChild(a);
       a.click();
       
-      // Cleanup
       setTimeout(() => {
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
@@ -130,7 +96,7 @@ const TailoredResumeSection = ({ resumeText, jobDescription, results }: Tailored
       
       toast({
         title: "Downloaded!",
-        description: "Your tailored resume has been saved as text.",
+        description: "Your resume has been saved as a text file.",
       });
     } catch (error) {
       console.error("Text download failed:", error);
@@ -143,15 +109,13 @@ const TailoredResumeSection = ({ resumeText, jobDescription, results }: Tailored
   };
 
   const handleDownloadPdf = async () => {
-    if (!tailoredResume) return;
-    
     try {
       toast({
         title: "Generating PDF",
-        description: "Creating your professionally formatted resume...",
+        description: "Creating your professionally formatted resume PDF...",
       });
       
-      await generateResumePdf(tailoredResume);
+      await generateResumePdf(cleanResumeText);
       
       toast({
         title: "PDF Downloaded!",
@@ -167,6 +131,10 @@ const TailoredResumeSection = ({ resumeText, jobDescription, results }: Tailored
     }
   };
 
+  const hasSuggestions = results.suggestions.additions.length > 0 ||
+    results.suggestions.improvements.length > 0 ||
+    results.suggestions.removals.length > 0;
+
   return (
     <Card className="bg-card shadow-card border-border hover-lift animate-slide-up mt-8" style={{ animationDelay: "0.5s" }}>
       <CardHeader>
@@ -175,9 +143,9 @@ const TailoredResumeSection = ({ resumeText, jobDescription, results }: Tailored
             <div className="w-10 h-10 rounded-xl bg-accent/10 flex items-center justify-center transition-transform hover:scale-110">
               <FileEdit className="w-5 h-5 text-accent" />
             </div>
-            Tailored Resume
+            Export Improved Resume
           </div>
-          {!tailoredResume && (
+          {!isReady && (
             <Button
               variant="hero"
               size="sm"
@@ -188,40 +156,39 @@ const TailoredResumeSection = ({ resumeText, jobDescription, results }: Tailored
               {isGenerating ? (
                 <>
                   <Loader2 className="w-4 h-4 animate-spin" />
-                  Tailoring...
+                  Preparing...
                 </>
               ) : (
                 <>
-                  <FileEdit className="w-4 h-4" />
-                  Generate Tailored Resume
+                  <FileText className="w-4 h-4" />
+                  Prepare Resume for Export
                 </>
               )}
             </Button>
           )}
         </CardTitle>
         <p className="text-sm text-muted-foreground mt-2">
-          Generate an optimized version of your resume with all suggestions applied, while preserving your original structure and formatting.
+          Export your resume as a professionally formatted, ATS-friendly PDF. Review the suggestions below and apply them to your resume before exporting.
         </p>
       </CardHeader>
       <CardContent>
-        {!tailoredResume && !isGenerating && (
+        {!isReady && !isGenerating && (
           <div className="text-center py-12 text-muted-foreground">
-            <FileEdit className="w-12 h-12 mx-auto mb-4 opacity-30" />
-            <p>Click the button above to generate your tailored resume</p>
-            <p className="text-sm mt-2">The AI will apply all suggested improvements while maintaining your original resume structure</p>
+            <FileText className="w-12 h-12 mx-auto mb-4 opacity-30" />
+            <p>Click the button above to prepare your resume for PDF export</p>
+            <p className="text-sm mt-2">Your resume will be formatted into a clean, professional PDF document</p>
           </div>
         )}
 
         {isGenerating && (
           <div className="text-center py-12">
             <Loader2 className="w-12 h-12 mx-auto mb-4 text-primary animate-spin" />
-            <p className="text-muted-foreground">Applying suggestions to your resume...</p>
-            <p className="text-sm text-muted-foreground mt-2">This may take a moment</p>
+            <p className="text-muted-foreground">Preparing your resume...</p>
           </div>
         )}
 
-        {tailoredResume && (
-          <div className="space-y-4">
+        {isReady && (
+          <div className="space-y-6">
             {/* Score Display */}
             {scores && (
               <div className="bg-gradient-to-r from-primary/10 via-accent/5 to-primary/10 rounded-xl p-4 border border-primary/20">
@@ -261,59 +228,102 @@ const TailoredResumeSection = ({ resumeText, jobDescription, results }: Tailored
                 )}
               </div>
             )}
-            
-            <div className="flex justify-end gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleCopy}
-                className="gap-2"
-              >
-                {copied ? (
-                  <>
-                    <Check className="w-4 h-4" />
-                    Copied!
-                  </>
-                ) : (
-                  <>
-                    <Copy className="w-4 h-4" />
-                    Copy
-                  </>
+
+            {/* Suggestions to apply before exporting */}
+            {hasSuggestions && (
+              <div className="bg-muted/30 rounded-xl p-5 border border-border space-y-4">
+                <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
+                  <Lightbulb className="w-4 h-4 text-yellow-500" />
+                  Apply these suggestions to your resume before exporting:
+                </div>
+                
+                {results.suggestions.additions.length > 0 && (
+                  <div>
+                    <p className="text-xs font-medium text-accent flex items-center gap-1.5 mb-2">
+                      <Plus className="w-3.5 h-3.5" />
+                      Suggested Additions
+                    </p>
+                    <ul className="space-y-1.5">
+                      {results.suggestions.additions.map((s, i) => (
+                        <li key={i} className="text-sm text-muted-foreground flex items-start gap-2">
+                          <span className="text-accent/60 mt-0.5 flex-shrink-0">•</span>
+                          {s}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
                 )}
-              </Button>
-              <Button
-                variant="default"
-                size="sm"
-                onClick={handleDownloadPdf}
-                className="gap-2"
-              >
-                <FileText className="w-4 h-4" />
-                Download PDF
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleDownloadTxt}
-                className="gap-2"
-              >
-                <Download className="w-4 h-4" />
-                Text
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={handleGenerateTailoredResume}
-                disabled={isGenerating}
-                className="gap-2"
-              >
-                <FileEdit className="w-4 h-4" />
-                Regenerate
-              </Button>
+
+                {results.suggestions.improvements.length > 0 && (
+                  <div>
+                    <p className="text-xs font-medium text-primary flex items-center gap-1.5 mb-2">
+                      <ArrowUp className="w-3.5 h-3.5" />
+                      Suggested Improvements
+                    </p>
+                    <ul className="space-y-1.5">
+                      {results.suggestions.improvements.map((s, i) => (
+                        <li key={i} className="text-sm text-muted-foreground flex items-start gap-2">
+                          <span className="text-primary/60 mt-0.5 flex-shrink-0">•</span>
+                          {s}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Export Actions */}
+            <div className="flex flex-wrap items-center justify-between gap-3 p-4 bg-muted/20 rounded-xl border border-border">
+              <p className="text-sm text-muted-foreground">
+                Export your resume as a formatted PDF or plain text file.
+              </p>
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleCopy}
+                  className="gap-2"
+                >
+                  {copied ? (
+                    <>
+                      <Check className="w-4 h-4" />
+                      Copied!
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-4 h-4" />
+                      Copy Text
+                    </>
+                  )}
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleDownloadTxt}
+                  className="gap-2"
+                >
+                  <Download className="w-4 h-4" />
+                  Text File
+                </Button>
+                <Button
+                  variant="default"
+                  size="sm"
+                  onClick={handleDownloadPdf}
+                  className="gap-2"
+                >
+                  <FileText className="w-4 h-4" />
+                  Download PDF
+                </Button>
+              </div>
             </div>
-            <div className="bg-muted/30 rounded-xl p-6 border border-border max-h-[600px] overflow-y-auto">
-              <pre className="whitespace-pre-wrap font-sans text-sm text-foreground leading-relaxed">
-                {tailoredResume}
-              </pre>
+            
+            {/* Resume Preview */}
+            <div>
+              <p className="text-xs font-medium text-muted-foreground mb-2">Resume Preview</p>
+              <div className="bg-muted/30 rounded-xl p-6 border border-border max-h-[500px] overflow-y-auto">
+                <pre className="whitespace-pre-wrap font-sans text-sm text-foreground leading-relaxed text-left">{cleanResumeText}</pre>
+              </div>
             </div>
           </div>
         )}

@@ -8,32 +8,26 @@ A comprehensive resume analysis tool powered by AI that helps job seekers optimi
 
 ### 🎯 Dual Analysis Modes
 
-**Normal Review** (TF-IDF Based)
-- Fast, local analysis using keyword matching
-- No API key required
-- Instant results
-- Privacy-focused
+**1. Normal Review (Local Analysis)**
+- Fast, local analysis using TF-IDF keyword matching.
+- Evaluates resume structure and extracts ATS parsability scores.
+- **Privacy-focused**: Processing happens entirely in your browser.
+- **No API key required**, completely free.
 
-**AI Review** (Gemini 2.5 Flash Lite Powered)
-- **Advanced AI Analysis**: Uses the latest `gemini-2.5-flash-lite` model for high-quality insights.
-- **Free Tier Optimized**: Smart pipeline optimization reduces API calls (single call for full analysis), making it perfect for free tier usage.
-- **Personalized Feedback**: Detailed suggestions, strong matches, and critical gaps.
-- **Flexible Keys**: Works with Emergent universal key OR your own personal Gemini API key.
+**2. AI Review (Gemini-Powered)**
+- **Advanced AI Analysis**: Uses the `gemini-2.5-flash-lite` model for deep semantic insights.
+- **Personalized Feedback**: Detailed suggestions, JD semantic match scoring, and critical gaps identification.
+- **Bias Auditing**: Includes a FAIRE-methodology bias audit feature testing the AI against name variants.
+- **Requires your own Google Gemini API key** (securely saved locally in your browser).
 
 ### 📊 Comprehensive Scoring
 - **ATS Score** (0-100)
 - **Structure Score** (0-100)
-- **JD Match Score** (0-100)
+- **JD Match Score** (0-100, based on semantic similarity and keyword presence)
 
-### 💡 Intelligent Suggestions
-- Specific additions and removals
-- Priority actions for maximum impact
-- Candidate context extraction
-
-### 🎨 Beautiful UI
-- Modern React + Tailwind CSS interface
-- Dark/Light mode support
-- Smooth animations (shadcn/ui)
+### 💡 Intelligent Tools
+- **Tailored Resume Generator**: Automatically applies AI suggestions and provides a clean PDF or TXT export of the improved resume.
+- **Resume Chat**: Chat directly with your resume to ask questions, simulate interviews, or get specific phrasing advice.
 
 ---
 
@@ -44,8 +38,8 @@ Follow these steps to set up the project locally.
 ### 📋 Prerequisites
 - **Node.js** (v18+)
 - **Python** (v3.11+)
-- **MongoDB** (v5.0+)
-- **Yarn**
+- **MongoDB** (v5.0+) (Running locally or via Atlas)
+- **Yarn** or **npm**
 
 ### 1. Installation
 
@@ -67,19 +61,16 @@ python -m venv venv
 
 # Install dependencies
 pip install -r requirements.txt
-pip install emergentintegrations --extra-index-url https://d33sy5i8bnduwe.cloudfront.net/simple/
 
 # Create .env file
-# (See .env.example if available, or use the configuration below)
 ```
 
 **Backend `.env` Configuration:**
 ```env
 MONGO_URL=mongodb://localhost:27017
 DB_NAME=resume_analyzer_db
-CORS_ORIGINS=http://localhost:3000,http://127.0.0.1:3000
-EMERGENT_LLM_KEY=sk-emergent-0984aD5617aB265E3A
-# Optional: GEMINI_API_KEY=your_gemini_key_here
+CORS_ORIGINS=http://localhost:5173,http://localhost:3000,http://127.0.0.1:5173
+JWT_SECRET_KEY=your_secure_random_string_here
 ```
 
 ### 3. Frontend Setup
@@ -88,6 +79,8 @@ EMERGENT_LLM_KEY=sk-emergent-0984aD5617aB265E3A
 cd ../frontend
 
 # Install dependencies
+npm install
+# or
 yarn install
 
 # Create .env file
@@ -95,68 +88,70 @@ yarn install
 
 **Frontend `.env` Configuration:**
 ```env
-VITE_SUPABASE_PROJECT_ID=hcxcoxipjhzfupchssyf
-VITE_SUPABASE_PUBLISHABLE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhjeGNveGlwamh6ZnVwY2hzc3lmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjcwOTg1ODQsImV4cCI6MjA4MjY3NDU4NH0.APrd8JVPuoeSm99RB1AdILRpFwMNDAZcaYySPKTQSIc
-VITE_SUPABASE_URL=https://hcxcoxipjhzfupchssyf.supabase.co
-REACT_APP_BACKEND_URL=http://localhost:8001
+VITE_APP_BACKEND_URL=http://localhost:8001
 ```
 
 ### 4. Run Application
 
-**Start Backend:**
+**Start Backend (FastAPI):**
 ```bash
 cd backend
-uvicorn server:app --reload --port 8001
+uvicorn server:app --reload --host 0.0.0.0 --port 8001
 ```
 
-**Start Frontend:**
+**Start Frontend (Vite):**
 ```bash
 cd frontend
+npm run dev
+# or 
 yarn dev
 ```
 
-Visit **http://localhost:3000** to use the app!
+Visit the URL provided by Vite (usually **http://localhost:5173**) to use the app!
 
 ---
+
+## 🔑 API Keys
+
+To use the **AI Review** mode, you must provide your own Google Gemini API key.
+1. Get a free API key from [Google AI Studio](https://aistudio.google.com/apikey).
+2. When you click "AI Analyze" in the app, you will be prompted to enter your key.
+3. Your key is stored securely in your browser's local storage and sent directly to the backend for analysis.
 
 ## 🛠️ Technology Stack
 
 ### Backend
 - **FastAPI** & **Uvicorn**
-- **MongoDB** & **Motor** (Async)
-- **Google Gemini 2.5 Flash Lite** (via `google-generativeai`)
-- **Emergent Integrations**
+- **MongoDB** & **Motor** (Async DB Driver)
+- **Google Gemini SDK** (`google-generativeai`)
+- **PyJWT** & **Passlib** (Custom Session Authentication)
 
 ### Frontend
 - **React 18** & **Vite**
 - **TypeScript**
 - **Tailwind CSS** & **shadcn/ui**
-- **Supabase** (Auth & DB)
+- **Lucide React** (Icons)
 
 ## 📁 Project Structure
 
 ```
 resume-analyzer/
 ├── backend/
-│   ├── server.py              # Main application logic
-│   └── requirements.txt       # Python deps
+│   ├── server.py              # Main FastAPI application logic & endpoints
+│   └── requirements.txt       # Python dependencies
 ├── frontend/
-│   ├── src/                   # React source
-│   └── package.json           # Node deps
-├── SETUP.md                   # Advanced troubleshooting
+│   ├── src/
+│   │   ├── components/        # React UI components (Analyzer, Results, Chat, etc.)
+│   │   ├── lib/               # Utilities (Local analysis, PDF generation, API)
+│   │   └── hooks/             # Custom React hooks (Auth, Profile)
+│   ├── package.json           # Node dependencies
+│   └── vite.config.ts         # Vite bundler config
 └── README.md                  # This file
 ```
 
-## 🔑 API Keys
-
-The app comes with a shared **Emergent Universal Key** pre-configured. It works out of the box!
-If you prefer to use your own **Google Gemini API Key**:
-1. Get a key from [Google AI Studio](https://makersuite.google.com/app/apikey).
-2. Enter it in the App Settings OR add `GEMINI_API_KEY` to your backend `.env`.
-
 ## 🤝 Contributing
 
-PRs are welcome! Please follow the code style (PEP 8 for Python, ESLint for JS/TS).
+PRs are welcome! Please follow standard code styles (PEP 8 for Python, ESLint/Prettier for React).
 
 ## 📝 License
 

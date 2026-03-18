@@ -9,13 +9,21 @@ import ResumeChat from "./ResumeChat";
 import TailoredResumeSection from "./TailoredResumeSection";
 import LoginPrompt from "./LoginPrompt";
 import AnalysisHistory from "./AnalysisHistory";
+import BiasAuditSection from "./BiasAuditSection";
 import ApiKeyDialog from "./profile/ApiKeyDialog";
 import { toast } from "@/hooks/use-toast";
-import { supabase } from "@/integrations/supabase/client";
+
 import { useAuth } from "@/hooks/use-auth";
 import { useProfile } from "@/hooks/use-profile";
 import { extractTextFromPDF, isValidPDFFile } from "@/lib/pdfParser";
 import { analyzeResumeLocally } from "@/lib/localResumeAnalyzer";
+
+export interface ScoreBreakdownItem {
+  criterionName: string;
+  scoreAwarded: number;
+  maxPossible: number;
+  evidence: string;
+}
 
 export interface AnalysisResult {
   atsScore: number;
@@ -28,7 +36,7 @@ export interface AnalysisResult {
     improvements: string[];
   };
   structureAnalysis: {
-    sections: { name: string; status: "good" | "needs-improvement" | "missing" }[];
+    sections: { name: string; status: "good" | "needs-improvement" | "missing"; feedback?: string }[];
     formatting: string[];
   };
   candidateContext?: {
@@ -42,6 +50,17 @@ export interface AnalysisResult {
     criticalGaps: string[];
     quickWins: string[];
   };
+  // Research enhancement fields
+  analysisId?: string;
+  promptVersion?: string;
+  mode?: string;
+  semanticMatchScore?: number;
+  scoreBreakdown?: {
+    ats?: ScoreBreakdownItem[];
+    jdMatch?: ScoreBreakdownItem[];
+    structure?: ScoreBreakdownItem[];
+  };
+  biasFlag?: string;
 }
 
 type AnalysisMode = "normal" | "ai";
@@ -104,12 +123,11 @@ const AnalyzerSection = () => {
       return;
     }
 
-    // For AI mode, if user doesn't have an API key configured, we'll use Emergent LLM key
-    // So no need to block the user - they can optionally provide their own key
-    if (analysisMode === "ai" && !hasApiKey && pendingAnalysis) {
-      // User clicked analyze but dismissed the API key dialog
-      // Just proceed with Emergent key
-      setPendingAnalysis(false);
+    // For AI mode, user MUST have an API key configured
+    if (analysisMode === "ai" && !hasApiKey) {
+      setShowApiKeyDialog(true);
+      setPendingAnalysis(true);
+      return;
     }
 
     setIsAnalyzing(true);
@@ -150,15 +168,15 @@ const AnalyzerSection = () => {
         const requestBody: any = {
           resumeText: finalResumeText,
           jobDescription: jobDescription.trim() || null,
+          mode: "ai_analyse",
+          modelName: "gemini-2.5-flash-lite",
         };
 
         // If user has provided their own Gemini API key, use it
-        // Otherwise, use Emergent LLM key (default)
         if (geminiApiKey && geminiApiKey.trim()) {
           requestBody.geminiApiKey = geminiApiKey.trim();
-          requestBody.useEmergentKey = false;
         } else {
-          requestBody.useEmergentKey = true;
+          throw new Error("Gemini API key is required for AI analysis.");
         }
 
         const response = await fetch(`${backendUrl}/api/analyze-resume`, {
@@ -214,8 +232,12 @@ const AnalyzerSection = () => {
 
   const saveAnalysisToHistory = async (resumeTextToSave: string, analysisResult: AnalysisResult) => {
     try {
-      await (supabase as any).from("resume_analyses").insert({
-        user_id: user?.id,
+      if (!user) return;
+      const storageKey = `aicruit_history_${user.id}`;
+      const existing = JSON.parse(localStorage.getItem(storageKey) || "[]");
+      const entry = {
+        id: Date.now().toString(),
+        created_at: new Date().toISOString(),
         resume_text: resumeTextToSave,
         job_description: jobDescription.trim() || null,
         ats_score: analysisResult.atsScore,
@@ -224,7 +246,10 @@ const AnalyzerSection = () => {
         suggestions: analysisResult.suggestions,
         structure_analysis: analysisResult.structureAnalysis,
         candidate_context: analysisResult.candidateContext ?? null,
-      });
+      };
+      // Keep last 10 entries
+      const updated = [entry, ...existing].slice(0, 10);
+      localStorage.setItem(storageKey, JSON.stringify(updated));
     } catch (error) {
       console.error("Failed to save analysis:", error);
     }
@@ -350,7 +375,7 @@ const AnalyzerSection = () => {
                       <span className="font-semibold">AI Review</span>
                     </div>
                     <p className="text-xs text-muted-foreground">
-                      Advanced AI analysis using Google Gemini. Works with Emergent key or your own API key.
+                      Advanced AI analysis using Google Gemini. Requires your own Gemini API key.
                     </p>
                   </button>
                 </div>
@@ -363,7 +388,7 @@ const AnalyzerSection = () => {
                     <div className="flex items-center gap-2">
                       <Key className="w-4 h-4 text-primary" />
                       <Label className="text-sm font-medium">
-                        Gemini API Key (Optional)
+                        Gemini API Key (Required)
                       </Label>
                     </div>
                     {hasApiKey ? (
@@ -383,8 +408,8 @@ const AnalyzerSection = () => {
                   </div>
                   <p className="text-xs text-muted-foreground mt-2">
                     {hasApiKey 
-                      ? "Your API key is securely stored and will be used for analysis. Using Emergent key as fallback."
-                      : "No API key configured. The app will use Emergent universal key for AI analysis. You can optionally add your own key."
+                      ? "Your API key is securely stored and will be used for analysis."
+                      : "No API key configured. You must add your own Gemini API key to use AI analysis."
                     }
                   </p>
                 </div>
@@ -490,6 +515,13 @@ const AnalyzerSection = () => {
               jobDescription={jobDescription}
               onReset={resetAnalysis} 
             />
+            {analysisMode === "ai" && (
+              <BiasAuditSection
+                resumeText={resumeText}
+                jobDescription={jobDescription}
+                geminiApiKey={geminiApiKey}
+              />
+            )}
             <TailoredResumeSection
               resumeText={resumeText}
               jobDescription={jobDescription}

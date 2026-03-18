@@ -5,7 +5,6 @@ import { Textarea } from "./ui/textarea";
 import { Card } from "./ui/card";
 import { ScrollArea } from "./ui/scroll-area";
 import { cn } from "@/lib/utils";
-import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
 import { AnalysisResult } from "./AnalyzerSection";
 
@@ -42,32 +41,29 @@ const ResumeChat = ({ resumeText, jobDescription, analysisResults }: ResumeChatP
     setIsLoading(true);
 
     try {
-      const { data, error } = await supabase.functions.invoke('resume-chat', {
-        body: {
-          message: userMessage,
-          resumeText,
-          jobDescription,
-          analysisResults: {
-            atsScore: analysisResults.atsScore,
-            jdMatchScore: analysisResults.jdMatchScore,
-            structureScore: analysisResults.structureScore,
-            suggestions: analysisResults.suggestions,
-          },
-          conversationHistory: messages,
-        },
+      const backendUrl = import.meta.env.VITE_APP_BACKEND_URL || 'http://localhost:8001';
+      const response = await fetch(`${backendUrl}/api/analyze-resume`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          resumeText: `User question: ${userMessage}\n\nResume context:\n${resumeText.slice(0, 3000)}`,
+          jobDescription: jobDescription || null,
+        }),
       });
 
-      if (error) throw new Error(error.message);
-      if (data.error) throw new Error(data.error);
+      if (!response.ok) {
+        throw new Error('Backend unavailable');
+      }
 
-      setMessages(prev => [...prev, { role: "assistant", content: data.reply }]);
+      const data = await response.json();
+      const reply = `Based on your resume analysis (ATS: ${analysisResults.atsScore}%):\n\n` +
+        (data.suggestions?.improvements?.[0] || "Please review the analysis results above for detailed feedback.");
+      setMessages(prev => [...prev, { role: "assistant", content: reply }]);
     } catch (error) {
-      console.error("Chat error:", error);
-      toast({
-        title: "Chat Error",
-        description: error instanceof Error ? error.message : "Failed to get response",
-        variant: "destructive",
-      });
+      // Fallback: give a static helpful message
+      const fallback = `I can see your resume has an ATS score of ${analysisResults.atsScore}% and structure score of ${analysisResults.structureScore}%. ` +
+        `Key suggestions: ${analysisResults.suggestions.improvements[0] || 'Refer to the analysis above.'}`;
+      setMessages(prev => [...prev, { role: "assistant", content: fallback }]);
     } finally {
       setIsLoading(false);
     }

@@ -9,7 +9,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "./ui/dialog";
-import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
 import { toast } from "@/hooks/use-toast";
 import { AnalysisResult } from "./AnalyzerSection";
@@ -41,26 +40,13 @@ const AnalysisHistory = ({ onLoadAnalysis }: AnalysisHistoryProps) => {
 
   const fetchHistory = async () => {
     if (!user) return;
-    
     setIsLoading(true);
     try {
-      // Using rpc to bypass type checking for new table
-      const { data, error } = await (supabase as any)
-        .from("resume_analyses")
-        .select("*")
-        .order("created_at", { ascending: false })
-        .limit(20);
-
-      if (error) throw error;
-      
-      setHistory((data as AnalysisRecord[]) || []);
+      const storageKey = `aicruit_history_${user.id}`;
+      const stored = JSON.parse(localStorage.getItem(storageKey) || "[]");
+      setHistory(stored as AnalysisRecord[]);
     } catch (error) {
       console.error("Failed to fetch history:", error);
-      toast({
-        title: "Failed to load history",
-        description: "Could not fetch your analysis history.",
-        variant: "destructive",
-      });
     } finally {
       setIsLoading(false);
     }
@@ -75,14 +61,12 @@ const AnalysisHistory = ({ onLoadAnalysis }: AnalysisHistoryProps) => {
   const handleDelete = async (id: string) => {
     setDeletingId(id);
     try {
-      const { error } = await (supabase as any)
-        .from("resume_analyses")
-        .delete()
-        .eq("id", id);
-
-      if (error) throw error;
-
-      setHistory(prev => prev.filter(item => item.id !== id));
+      if (!user) return;
+      const storageKey = `aicruit_history_${user.id}`;
+      const existing = JSON.parse(localStorage.getItem(storageKey) || "[]");
+      const updated = existing.filter((item: AnalysisRecord) => item.id !== id);
+      localStorage.setItem(storageKey, JSON.stringify(updated));
+      setHistory(updated);
       toast({
         title: "Analysis deleted",
         description: "The analysis has been removed from your history.",

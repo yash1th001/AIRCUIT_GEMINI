@@ -28,15 +28,13 @@ yarn install
 ```env
 MONGO_URL=mongodb://localhost:27017
 DB_NAME=resume_analyzer_db
-CORS_ORIGINS=http://localhost:3000
-EMERGENT_LLM_KEY=sk-emergent-0984aD5617aB265E3A
+CORS_ORIGINS=http://localhost:5173,http://localhost:3000,http://127.0.0.1:5173
+JWT_SECRET_KEY=your_secure_random_string_here
 ```
 
 **Frontend** (`frontend/.env`):
 ```env
-VITE_SUPABASE_URL=https://hcxcoxipjhzfupchssyf.supabase.co
-VITE_SUPABASE_PUBLISHABLE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhjeGNveGlwamh6ZnVwY2hzc3lmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjcwOTg1ODQsImV4cCI6MjA4MjY3NDU4NH0.APrd8JVPuoeSm99RB1AdILRpFwMNDAZcaYySPKTQSIc
-REACT_APP_BACKEND_URL=http://localhost:8001
+VITE_APP_BACKEND_URL=http://localhost:8001
 ```
 
 ### 3. Start Services
@@ -55,7 +53,7 @@ yarn dev
 
 ### 4. Access App
 
-Open browser: **http://localhost:3000**
+Open browser: **http://localhost:5173** (or the port Vite provides)
 
 ## Quick Test
 
@@ -66,7 +64,7 @@ curl http://localhost:8001/api/
 # Test AI analysis
 curl -X POST http://localhost:8001/api/analyze-resume \
   -H "Content-Type: application/json" \
-  -d '{"resumeText": "John Doe\nSoftware Engineer\nSkills: Python, React", "useEmergentKey": true}'
+  -d '{"resumeText": "John Doe\nSoftware Engineer\nSkills: Python, React", "jobDescription": null}'
 ```
 
 ## Common Issues
@@ -80,12 +78,7 @@ sudo systemctl start mongod            # Linux
 **Port already in use?**
 ```bash
 lsof -ti:8001 | xargs kill -9  # Kill backend
-lsof -ti:3000 | xargs kill -9  # Kill frontend
-```
-
-**Missing module?**
-```bash
-pip install emergentintegrations --extra-index-url https://d33sy5i8bnduwe.cloudfront.net/simple/
+lsof -ti:5173 | xargs kill -9  # Kill frontend
 ```
 
 ---

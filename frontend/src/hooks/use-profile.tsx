@@ -1,5 +1,4 @@
 import { createContext, useContext, useEffect, useState, ReactNode, useCallback } from 'react';
-import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from './use-auth';
 
 interface Profile {
@@ -23,6 +22,22 @@ interface ProfileContextType {
 
 const ProfileContext = createContext<ProfileContextType | undefined>(undefined);
 
+// Store the Gemini API key in localStorage keyed by user id
+function getStorageKey(userId: string) {
+  return `aicruit_gemini_key_${userId}`;
+}
+
+function makeProfile(userId: string, geminiApiKey: string | null): Profile {
+  return {
+    id: userId,
+    user_id: userId,
+    gemini_api_key: geminiApiKey,
+    display_name: null,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  };
+}
+
 export const ProfileProvider = ({ children }: { children: ReactNode }) => {
   const { user } = useAuth();
   const [profile, setProfile] = useState<Profile | null>(null);
@@ -34,36 +49,10 @@ export const ProfileProvider = ({ children }: { children: ReactNode }) => {
       setIsLoading(false);
       return;
     }
-
     setIsLoading(true);
     try {
-      const { data, error } = await (supabase as any)
-        .from('profiles')
-        .select('*')
-        .eq('user_id', user.id)
-        .single();
-
-      if (error) {
-        // Profile might not exist yet (for existing users before migration)
-        if (error.code === 'PGRST116') {
-          // Create profile for existing user
-          const { data: newProfile, error: insertError } = await (supabase as any)
-            .from('profiles')
-            .insert({ user_id: user.id })
-            .select()
-            .single();
-
-          if (!insertError && newProfile) {
-            setProfile(newProfile);
-          }
-        } else {
-          console.error('Error fetching profile:', error);
-        }
-      } else {
-        setProfile(data);
-      }
-    } catch (err) {
-      console.error('Profile fetch error:', err);
+      const stored = localStorage.getItem(getStorageKey(user.id));
+      setProfile(makeProfile(user.id, stored || null));
     } finally {
       setIsLoading(false);
     }
@@ -74,35 +63,24 @@ export const ProfileProvider = ({ children }: { children: ReactNode }) => {
   }, [fetchProfile]);
 
   const updateGeminiApiKey = async (apiKey: string): Promise<{ error: Error | null }> => {
-    if (!user || !profile) {
-      return { error: new Error('No user or profile found') };
-    }
-
+    if (!user) return { error: new Error('No user found') };
     try {
-      const { error } = await (supabase as any)
-        .from('profiles')
-        .update({ gemini_api_key: apiKey.trim() || null })
-        .eq('user_id', user.id);
-
-      if (error) {
-        return { error: new Error(error.message) };
+      const trimmed = apiKey.trim() || null;
+      if (trimmed) {
+        localStorage.setItem(getStorageKey(user.id), trimmed);
+      } else {
+        localStorage.removeItem(getStorageKey(user.id));
       }
-
-      // Update local state
-      setProfile(prev => prev ? { ...prev, gemini_api_key: apiKey.trim() || null } : null);
+      setProfile(makeProfile(user.id, trimmed));
       return { error: null };
     } catch (err) {
       return { error: err instanceof Error ? err : new Error('Failed to update API key') };
     }
   };
 
-  const clearGeminiApiKey = async (): Promise<{ error: Error | null }> => {
-    return updateGeminiApiKey('');
-  };
+  const clearGeminiApiKey = async () => updateGeminiApiKey('');
 
-  const refreshProfile = async () => {
-    await fetchProfile();
-  };
+  const refreshProfile = async () => fetchProfile();
 
   return (
     <ProfileContext.Provider

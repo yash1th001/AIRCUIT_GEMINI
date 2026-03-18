@@ -58,7 +58,10 @@ MONGO_URL=mongodb://localhost:27017
 DB_NAME=resume_analyzer_db
 
 # CORS Configuration
-CORS_ORIGINS=http://localhost:3000,http://127.0.0.1:3000
+CORS_ORIGINS=http://localhost:5173,http://localhost:3000,http://127.0.0.1:5173
+
+# JWT Configuration (for authentication)
+JWT_SECRET_KEY=your_secure_random_string_here
 
 **Note:** If you want to use your own Gemini API key, you can configure `GEMINI_API_KEY` in `backend/.env` or add it through the app's UI.
 
@@ -68,6 +71,8 @@ CORS_ORIGINS=http://localhost:3000,http://127.0.0.1:3000
 
 ```bash
 cd frontend
+npm install
+# or
 yarn install
 ```
 
@@ -84,17 +89,8 @@ cp .env.example .env  # If you have an example file
 Add the following to `frontend/.env`:
 
 ```env
-# Supabase Configuration (for authentication)
-VITE_SUPABASE_PROJECT_ID=hcxcoxipjhzfupchssyf
-VITE_SUPABASE_PUBLISHABLE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhjeGNveGlwamh6ZnVwY2hzc3lmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjcwOTg1ODQsImV4cCI6MjA4MjY3NDU4NH0.APrd8JVPuoeSm99RB1AdILRpFwMNDAZcaYySPKTQSIc
-VITE_SUPABASE_URL=https://hcxcoxipjhzfupchssyf.supabase.co
-
 # Backend API URL
-REACT_APP_BACKEND_URL=http://localhost:8001
-
-# Development Configuration
-WDS_SOCKET_PORT=0
-ENABLE_HEALTH_CHECK=false
+VITE_APP_BACKEND_URL=http://localhost:8001
 ```
 
 ### 4. Manage MongoDB Process
@@ -166,15 +162,17 @@ INFO:     Application startup complete.
 
 ```bash
 cd frontend
+npm run dev
+# or 
 yarn dev
 ```
 
 You should see:
 ```
-VITE v5.4.21  ready in XXX ms
+VITE v...  ready in XXX ms
 
-➜  Local:   http://localhost:3000/
-➜  Network: http://192.168.x.x:3000/
+➜  Local:   http://localhost:5173/
+➜  Network: http://192.168.x.x:5173/
 ```
 
 #### Terminal 3: Monitor Logs (Optional)
@@ -189,10 +187,10 @@ tail -f /usr/local/var/log/mongodb/mongo.log
 
 ### 7. Access the Application
 
-Open your browser and navigate to:
+Open your browser and navigate to the URL provided by Vite (usually depends on the port):
 
 ```
-http://localhost:3000
+http://localhost:5173
 ```
 
 🎉 You should now see the Resume Analyzer app running!
@@ -218,15 +216,14 @@ The app works with the Google Gemini API. To use your own key:
 | `MONGO_URL` | MongoDB connection string | `mongodb://localhost:27017` |
 | `DB_NAME` | Database name | `resume_analyzer_db` |
 | `CORS_ORIGINS` | Allowed CORS origins | `*` |
-| `GEMINI_API_KEY` | Google Gemini API Key | Required |
+| `JWT_SECRET_KEY` | JWT Secret String | Required |
+| `GEMINI_API_KEY` | Google Gemini API Key | Optional |
 
 #### Frontend (`frontend/.env`)
 
 | Variable | Description | Required |
 |----------|-------------|----------|
-| `VITE_SUPABASE_URL` | Supabase project URL | Yes |
-| `VITE_SUPABASE_PUBLISHABLE_KEY` | Supabase anon key | Yes |
-| `REACT_APP_BACKEND_URL` | Backend API URL | Yes |
+| `VITE_APP_BACKEND_URL` | Backend API URL | Yes |
 
 ## 🧪 Testing the Setup
 
@@ -255,7 +252,7 @@ Expected: A JSON response with analysis scores and suggestions.
 
 ### Test Frontend
 
-1. Open http://localhost:3000 in your browser
+1. Open http://localhost:5173 in your browser
 2. Sign up or log in with email
 3. Navigate to "Resume Analyzer"
 4. Try both "Normal Review" and "AI Review" modes
@@ -312,15 +309,13 @@ yarn install
 
 ### Port Already in Use
 
-**Error:** `Port 3000 is already in use` or `Port 8001 is already in use`
+**Error:** `Port 5173 is already in use` or `Port 8001 is already in use`
 
 **Solution:**
 ```bash
 # Find and kill the process
-lsof -ti:3000 | xargs kill -9  # Frontend
+lsof -ti:5173 | xargs kill -9  # Frontend
 lsof -ti:8001 | xargs kill -9  # Backend
-
-# Or change ports in configuration
 ```
 
 ## 📁 Project Structure
@@ -366,8 +361,6 @@ For production deployment:
 - [FastAPI Documentation](https://fastapi.tiangolo.com/)
 - [React Documentation](https://react.dev/)
 - [MongoDB Documentation](https://docs.mongodb.com/)
-- [Supabase Documentation](https://supabase.com/docs)
-- [Emergent Integrations Guide](https://emergentagent.com/docs)
 
 ## 💬 Support
 

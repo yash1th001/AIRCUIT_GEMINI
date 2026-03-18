@@ -1,657 +1,536 @@
 import { jsPDF } from 'jspdf';
 
-interface ParsedSection {
-  type: 'header' | 'contact' | 'objective' | 'section-title' | 'education-entry' | 'experience-entry' | 'project-entry' | 'skills' | 'certification' | 'achievement' | 'bullet' | 'text' | 'technologies' | 'link';
-  content: string;
-  subContent?: string;
-  date?: string;
-  location?: string;
-  link?: string;
-}
+// ─── Types ────────────────────────────────────────────────────────────────────
 
-interface LinkPosition {
+type LineType =
+  | 'name'
+  | 'contact'
+  | 'section'
+  | 'entry-main'
+  | 'entry-sub'
+  | 'bullet'
+  | 'skills-row'
+  | 'text';
+
+interface ResumeLine {
+  type: LineType;
   text: string;
-  url: string;
-  x: number;
-  y: number;
-  width: number;
-  height: number;
+  date?: string;
+  sub?: string;
 }
 
-function parseResumeForLatexStyle(resumeText: string): ParsedSection[] {
-  const sections: ParsedSection[] = [];
-  const lines = resumeText.split('\n');
-  
-  const sectionHeaders = [
-    'objective', 'summary', 'professional summary', 'profile',
-    'education', 'academic background',
-    'experience', 'work experience', 'professional experience', 'employment',
-    'projects', 'personal projects', 'key projects',
-    'skills', 'technical skills', 'core competencies',
-    'certifications', 'certificates', 'licenses',
-    'achievements', 'accomplishments', 'awards',
-    'languages', 'interests', 'hobbies', 'publications', 'references'
-  ];
-  
+// ─── Constants ────────────────────────────────────────────────────────────────
+
+const SECTION_KEYWORDS = new Set([
+  'objective', 'summary', 'professional summary', 'career objective',
+  'education', 'academic background', 'academic qualifications',
+  'experience', 'work experience', 'professional experience', 'internship', 'internships', 'employment',
+  'projects', 'project', 'personal projects', 'key projects', 'academic projects',
+  'skills', 'technical skills', 'core competencies', 'key skills',
+  'certifications', 'certification', 'certificates', 'licenses',
+  'achievements', 'accomplishments', 'awards', 'honors',
+  'languages', 'languages spoken',
+  'interests', 'hobbies', 'publications', 'references',
+  'extra-curricular', 'extracurricular', 'activities',
+  'courses', 'coursework',
+]);
+
+const DATE_RE = /(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\.?\s*\d{4}\s*[-–—to]+\s*(?:Present|Current|Expected|(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\.?\s*\d{4})|\d{4}\s*[-–—to]+\s*(?:Present|Current|Expected|\d{4})|(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s*\d{4}/gi;
+
+const CONTACT_RE = /@|linkedin\.com|github\.com|^\+?\d[\d\s\-().]{6,}|^Phone:|^Email:|^LinkedIn:|^GitHub:/i;
+
+// ─── FIX 1: Flat-text normaliser ──────────────────────────────────────────────
+// When the AI returns the improved resume as a single paragraph (no real \n
+// separators), the parser receives one huge line and classifies everything as
+// 'text', producing the wall-of-text seen in Image 2.
+//
+// Strategy: if fewer than 6 lines are found after splitting on \n / \r\n,
+// AND the total text is longer than 300 chars, we treat it as a flat blob and
+// re-split it by injecting \n before every known section keyword and before
+// bullet markers so the parser gets properly-structured input.
+// ──────────────────────────────────────────────────────────────────────────────
+
+function normaliseResumeText(raw: string): string {
+  // 1. Normalise Windows line endings
+  let text = raw.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+
+  // 2. Detect flat blob: split on \n and count non-empty lines
+  const existingLines = text.split('\n').filter(l => l.trim().length > 0);
+
+  if (existingLines.length >= 6) {
+    // Already properly line-broken — return as-is
+    return text;
+  }
+
+  // 3. Flat blob detected — inject line breaks before section keywords
+  // Build a regex from all section keywords, sorted longest-first to avoid
+  // partial matches (e.g. "skills" before "technical skills")
+  const kwSorted = [...SECTION_KEYWORDS].sort((a, b) => b.length - a.length);
+  const kwPattern = kwSorted
+    .map(kw => kw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')) // escape regex chars
+    .join('|');
+
+  // Insert \n before each section keyword (case-insensitive, word boundary)
+  text = text.replace(
+    new RegExp(`\\s+(${kwPattern})(?=\\s|:)`, 'gi'),
+    '\n$1'
+  );
+
+  // 4. Insert \n before bullet characters that are mid-sentence
+  text = text.replace(/\s+([•\-\*–○▪►])\s+/g, '\n$1 ');
+
+  // 5. Insert \n before lines that look like "Month YYYY" (project/edu dates)
+  text = text.replace(
+    /([\.\!])\s+((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s*\d{4})/gi,
+    '$1\n$2'
+  );
+
+  // 6. Collapse runs of spaces to single space within each segment
+  text = text
+    .split('\n')
+    .map(l => l.replace(/\s+/g, ' ').trim())
+    .filter(l => l.length > 0)
+    .join('\n');
+
+  return text;
+}
+
+// ─── Parser ───────────────────────────────────────────────────────────────────
+
+function parseResume(raw: string): ResumeLine[] {
+  const result: ResumeLine[] = [];
+
+  // FIX 1 applied: normalise before splitting
+  const normalised = normaliseResumeText(raw);
+
+  const lines = normalised
+    .split('\n')
+    .map(l => l.trim())
+    .filter(l => l.length > 0 && !/^[=\-]{3,}$/.test(l));
+
+  let nameFound = false;
   let currentSection = '';
-  let headerFound = false;
-  let contactBuffer: string[] = [];
-  
+
   for (let i = 0; i < lines.length; i++) {
-    const line = lines[i].trim();
-    if (!line) continue;
-    
-    // Skip separator lines
-    if (/^[=\-]{3,}$/.test(line)) continue;
-    
-    const lowerLine = line.toLowerCase().replace(/[:\-–—]/g, '').trim();
-    
-    // Check for Link: format
-    if (line.match(/^Link:\s*(https?:\/\/[^\s]+)/i)) {
-      const linkMatch = line.match(/^Link:\s*(https?:\/\/[^\s]+)/i);
-      if (linkMatch) {
-        sections.push({ type: 'link', content: linkMatch[1], link: linkMatch[1] });
-      }
-      continue;
-    }
-    
-    // Check for Technologies: format
-    if (line.match(/^Technologies?:\s*(.+)/i)) {
-      const techMatch = line.match(/^Technologies?:\s*(.+)/i);
-      if (techMatch) {
-        sections.push({ type: 'technologies', content: techMatch[1] });
-      }
-      continue;
-    }
-    
-    // Check if this is the name (first substantial line that's not a section header)
-    if (!headerFound && !sectionHeaders.includes(lowerLine)) {
-      // Check if it looks like a name (capitalized words, no special chars like @ or numbers for contact)
-      if (!/[@|]/.test(line) && !/^\+?\d{1,3}[-.\s]?\d{3,}/.test(line) && !/^Phone:|^Email:/i.test(line) && line.length < 60) {
-        sections.push({ type: 'header', content: line });
-        headerFound = true;
+    const line = lines[i];
+    const lower = line.toLowerCase().replace(/[:\-–—*]+$/g, '').trim();
+
+    // ── 1. Name ─────────────────────────────────────────────────────────────
+    if (!nameFound) {
+      const isContact = CONTACT_RE.test(line);
+      const isSectionKw = SECTION_KEYWORDS.has(lower);
+      if (!isContact && !isSectionKw && line.length < 60 && !/\d{4}/.test(line)) {
+        result.push({ type: 'name', text: line });
+        nameFound = true;
         continue;
       }
     }
-    
-    // Collect contact info (phone, email, linkedin, github)
-    if (headerFound && (
-      line.includes('@') || 
-      /linkedin\.com|github\.com/i.test(line) ||
-      /^Phone:|^Email:|^LinkedIn:|^GitHub:/i.test(line) ||
-      /\+?\d{1,3}[-.\s]?\(?\d{3}\)?[-.\s]?\d{3,}/.test(line) ||
-      (line.includes('|') && !sectionHeaders.includes(lowerLine))
-    )) {
-      contactBuffer.push(line);
+
+    // ── 2. Contact line ──────────────────────────────────────────────────────
+    if (CONTACT_RE.test(line) && !SECTION_KEYWORDS.has(lower)) {
+      result.push({ type: 'contact', text: line });
       continue;
     }
-    
-    // Flush contact buffer when we hit a section
-    if (contactBuffer.length > 0 && sectionHeaders.includes(lowerLine)) {
-      sections.push({ type: 'contact', content: contactBuffer.join(' | ') });
-      contactBuffer = [];
+
+    // ── 3. Section header ────────────────────────────────────────────────────
+    if (SECTION_KEYWORDS.has(lower)) {
+      currentSection = lower;
+      result.push({ type: 'section', text: line.replace(/[:\-–—]+$/, '').trim().toUpperCase() });
+      continue;
     }
-    
-    // Section headers
-    if (sectionHeaders.includes(lowerLine) || sectionHeaders.some(h => lowerLine === h || lowerLine.startsWith(h + ' '))) {
-      if (contactBuffer.length > 0) {
-        sections.push({ type: 'contact', content: contactBuffer.join(' | ') });
-        contactBuffer = [];
+
+    // ── 4. Bullet point ──────────────────────────────────────────────────────
+    if (/^[•\-\*–○▪►]/.test(line)) {
+      result.push({ type: 'bullet', text: line.replace(/^[•\-\*–○▪►]\s*/, '').trim() });
+      continue;
+    }
+
+    // ── 5. Skills row ────────────────────────────────────────────────────────
+    if (
+      currentSection.includes('skill') ||
+      currentSection.includes('competenc') ||
+      /^[A-Za-z ]+:\s+\S/.test(line)
+    ) {
+      result.push({ type: 'skills-row', text: line });
+      continue;
+    }
+
+    // ── 6. Entry with date ───────────────────────────────────────────────────
+    const dateMatches = [...line.matchAll(new RegExp(DATE_RE.source, 'gi'))];
+    if (dateMatches.length > 0) {
+      const dateStr = dateMatches.map(m => m[0]).join(' – ');
+      const textWithoutDate = line
+        .replace(new RegExp(DATE_RE.source, 'gi'), '')
+        .replace(/\s*[|\-–—]\s*$/, '')
+        .trim();
+
+      const next = lines[i + 1] ?? '';
+      const nextLower = next.toLowerCase().replace(/[:\-–—*]+$/g, '').trim();
+      const nextIsSection = SECTION_KEYWORDS.has(nextLower);
+      const nextIsDate = DATE_RE.test(next);
+      const nextIsBullet = /^[•\-\*–○▪►]/.test(next);
+      const nextIsContact = CONTACT_RE.test(next);
+
+      if (
+        !nextIsSection && !nextIsDate && !nextIsBullet &&
+        !nextIsContact && next.length > 0 && next.length < 100
+      ) {
+        result.push({ type: 'entry-main', text: textWithoutDate, date: dateStr, sub: next });
+        i++;
+      } else {
+        result.push({ type: 'entry-main', text: textWithoutDate, date: dateStr });
       }
-      currentSection = lowerLine;
-      sections.push({ type: 'section-title', content: line.replace(/[:\-–—]$/, '').trim().toUpperCase() });
+      DATE_RE.lastIndex = 0;
       continue;
     }
-    
-    // Date pattern for entries
-    const datePattern = /(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)[.\s]*\d{4}\s*[-–—to]+\s*(?:Present|Current|Expected|(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)[.\s]*\d{4})?|\d{4}\s*[-–—to]+\s*(?:Present|Current|Expected|\d{4})|(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s*\d{4}/gi;
-    
-    // Education entries
-    if (currentSection.includes('education')) {
-      const dateMatch = line.match(datePattern);
-      if (dateMatch || line.includes('University') || line.includes('College') || line.includes('Institute') || line.includes('B.Tech') || line.includes('M.Tech') || line.includes('Bachelor') || line.includes('Master') || line.includes('GPA')) {
-        const cleanLine = line.replace(datePattern, '').trim();
-        const nextLine = i + 1 < lines.length ? lines[i + 1].trim() : '';
-        const nextDateMatch = nextLine.match(datePattern);
-        
-        // Skip if it's just a continuation bullet
-        if (!line.startsWith('•') && !line.startsWith('-')) {
-          sections.push({
-            type: 'education-entry',
-            content: cleanLine || line,
-            date: dateMatch ? dateMatch[0] : (nextDateMatch ? nextDateMatch[0] : undefined),
-            subContent: nextLine && !sectionHeaders.includes(nextLine.toLowerCase()) && !nextLine.startsWith('•') && !nextLine.startsWith('-') && !nextLine.match(/^[=\-]{3,}$/) ? nextLine.replace(datePattern, '').trim() : undefined
-          });
-          
-          if (nextLine && !sectionHeaders.includes(nextLine.toLowerCase()) && !nextLine.startsWith('•') && !nextLine.startsWith('-') && !nextLine.match(/^[=\-]{3,}$/)) {
-            i++;
-          }
-          continue;
-        }
-      }
-    }
-    
-    // Project entries
-    if (currentSection.includes('project')) {
-      const dateMatch = line.match(datePattern);
-      
-      if (!line.startsWith('•') && !line.startsWith('-') && !line.startsWith('*') && !line.match(/^Technologies?:/i) && !line.match(/^Link:/i)) {
-        if (dateMatch || (line.length < 80 && !line.includes('•'))) {
-          sections.push({
-            type: 'project-entry',
-            content: line.replace(datePattern, '').trim(),
-            date: dateMatch ? dateMatch[0] : undefined
-          });
-          continue;
-        }
-      }
-    }
-    
-    // Experience entries
-    if (currentSection.includes('experience') || currentSection.includes('employment')) {
-      const dateMatch = line.match(datePattern);
-      if (!line.startsWith('•') && !line.startsWith('-') && !line.startsWith('*')) {
-        if (dateMatch) {
-          const cleanLine = line.replace(datePattern, '').trim();
-          const nextLine = i + 1 < lines.length ? lines[i + 1].trim() : '';
-          
-          sections.push({
-            type: 'experience-entry',
-            content: cleanLine,
-            date: dateMatch[0],
-            subContent: nextLine && !sectionHeaders.includes(nextLine.toLowerCase()) && !nextLine.startsWith('•') && !nextLine.startsWith('-') ? nextLine.replace(datePattern, '').trim() : undefined
-          });
-          
-          if (nextLine && !sectionHeaders.includes(nextLine.toLowerCase()) && !nextLine.startsWith('•') && !nextLine.startsWith('-')) {
-            i++;
-          }
-          continue;
-        }
-      }
-    }
-    
-    // Skills section
-    if (currentSection.includes('skill') || currentSection.includes('competenc')) {
-      sections.push({ type: 'skills', content: line });
-      continue;
-    }
-    
-    // Certifications
-    if (currentSection.includes('certif')) {
-      sections.push({ type: 'certification', content: line.replace(/^[•\-*–○]\s*/, '') });
-      continue;
-    }
-    
-    // Achievements
-    if (currentSection.includes('achieve') || currentSection.includes('accomplish') || currentSection.includes('award')) {
-      sections.push({ type: 'achievement', content: line.replace(/^[•\-*–○]\s*/, '') });
-      continue;
-    }
-    
-    // Objective/Summary content
-    if (currentSection.includes('objective') || currentSection.includes('summary') || currentSection.includes('profile')) {
-      sections.push({ type: 'objective', content: line });
-      continue;
-    }
-    
-    // Bullet points
-    if (line.startsWith('•') || line.startsWith('-') || line.startsWith('*') || line.startsWith('–') || line.startsWith('○')) {
-      const bulletContent = line.replace(/^[•\-*–○]\s*/, '').trim();
-      const linkMatch = bulletContent.match(/https?:\/\/[^\s]+/);
-      sections.push({
-        type: 'bullet',
-        content: bulletContent,
-        link: linkMatch ? linkMatch[0] : undefined
-      });
-      continue;
-    }
-    
-    // Default text
-    if (line.length > 0 && !line.match(/^[{}\\]/) && !line.match(/^[=\-]{3,}$/)) {
-      sections.push({ type: 'text', content: line });
-    }
+    DATE_RE.lastIndex = 0;
+
+    // ── 7. Generic text ──────────────────────────────────────────────────────
+    result.push({ type: 'text', text: line });
   }
-  
-  // Flush remaining contact info
-  if (contactBuffer.length > 0) {
-    sections.splice(1, 0, { type: 'contact', content: contactBuffer.join(' | ') });
-  }
-  
-  return sections;
+
+  return result;
 }
 
+// ─── PDF Renderer ─────────────────────────────────────────────────────────────
+
 export async function generateResumePdf(resumeText: string): Promise<void> {
-  const doc = new jsPDF({
-    orientation: 'portrait',
-    unit: 'pt',
-    format: 'letter',
-  });
-  
-  const pageWidth = doc.internal.pageSize.getWidth();
-  const pageHeight = doc.internal.pageSize.getHeight();
-  
-  // Margins matching LaTeX template
-  const marginLeft = 40;
-  const marginRight = 40;
-  const marginTop = 40;
-  const marginBottom = 40;
-  const contentWidth = pageWidth - marginLeft - marginRight;
-  
-  let yPosition = marginTop;
-  const maxY = pageHeight - marginBottom;
-  
-  // Colors
-  const black: [number, number, number] = [0, 0, 0];
-  const linkBlue: [number, number, number] = [0, 0, 180];
-  
-  // Font sizes
-  const FONT_SIZE = {
-    name: 18,
-    contact: 9,
-    section: 11,
-    subheading: 10,
-    subheadingItalic: 9,
-    body: 9,
-    small: 8
+  const doc = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'letter' });
+
+  const PW = doc.internal.pageSize.getWidth();   // 612
+  const PH = doc.internal.pageSize.getHeight();  // 792
+  const ML = 45;
+  const MR = 45;
+  const MT = 45;
+  const MB = 45;
+  const CW = PW - ML - MR; // 522
+
+  const BLACK: [number, number, number] = [0, 0, 0];
+  const BLUE:  [number, number, number] = [0, 70, 180];
+  const GRAY:  [number, number, number] = [100, 100, 100];
+  const DARK:  [number, number, number] = [30, 30, 30];
+
+  const FS = {
+    name:    20,
+    contact:  8.5,
+    section: 10.5,
+    bold:    10,
+    italic:   9,
+    body:     9,
+    small:    8,
   };
-  
-  // Line heights
-  const LINE_HEIGHT = {
-    name: 22,
-    contact: 11,
-    section: 16,
-    subheading: 13,
-    body: 11,
-    bullet: 11
+
+  const LH = {
+    name:    26,
+    contact: 12,
+    section: 14,
+    bold:    13,
+    italic:  11,
+    body:    12,
+    bullet:  12,
   };
-  
-  const sections = parseResumeForLatexStyle(resumeText);
-  const linkPositions: LinkPosition[] = [];
-  
-  // Helper to check page break
-  const checkNewPage = (neededSpace: number): boolean => {
-    if (yPosition + neededSpace > maxY) {
+
+  let y = MT;
+  const linkAnnotations: { x: number; y: number; w: number; h: number; url: string }[] = [];
+
+  // ── Helpers ──────────────────────────────────────────────────────────────────
+
+  const newPageIfNeeded = (need: number) => {
+    if (y + need > PH - MB) {
       doc.addPage();
-      yPosition = marginTop;
-      return true;
+      y = MT;
     }
-    return false;
   };
-  
-  // Helper to draw a clickable link
-  const drawLink = (text: string, url: string, x: number, y: number) => {
-    doc.setTextColor(...linkBlue);
-    doc.setFont('helvetica', 'normal');
-    doc.text(text, x, y);
-    const textWidth = doc.getTextWidth(text);
-    
-    // Add underline
-    doc.setDrawColor(...linkBlue);
-    doc.setLineWidth(0.5);
-    doc.line(x, y + 1.5, x + textWidth, y + 1.5);
-    
-    // Store link position for adding to PDF
-    linkPositions.push({
-      text,
-      url,
-      x,
-      y: y - 8,
-      width: textWidth,
-      height: 10
-    });
-    
-    doc.setTextColor(...black);
-    return textWidth;
-  };
-  
-  // Draw section title with rule line
-  const drawSectionTitle = (title: string) => {
-    checkNewPage(25);
-    yPosition += 10;
-    
-    doc.setFontSize(FONT_SIZE.section);
-    doc.setFont('helvetica', 'bold');
-    doc.setTextColor(...black);
-    
-    doc.text(title.toUpperCase(), marginLeft, yPosition);
-    
-    yPosition += 3;
+
+  const rgb = (c: [number, number, number]) => doc.setTextColor(c[0], c[1], c[2]);
+
+  const drawHRule = () => {
     doc.setDrawColor(50, 50, 50);
-    doc.setLineWidth(0.75);
-    doc.line(marginLeft, yPosition, pageWidth - marginRight, yPosition);
-    yPosition += 10;
+    doc.setLineWidth(0.6);
+    doc.line(ML, y, PW - MR, y);
+    y += 1;
   };
-  
-  // Draw entry with right-aligned date
-  const drawEntry = (main: string, date?: string, sub?: string, location?: string) => {
-    checkNewPage(30);
-    
-    // First row: Main heading (bold) + Date (right-aligned)
-    doc.setFontSize(FONT_SIZE.subheading);
-    doc.setFont('helvetica', 'bold');
-    doc.setTextColor(...black);
-    
-    const mainWidth = date ? contentWidth - 100 : contentWidth;
-    const mainLines = doc.splitTextToSize(main, mainWidth);
-    doc.text(mainLines[0], marginLeft, yPosition);
-    
-    if (date) {
-      doc.setFont('helvetica', 'normal');
-      doc.setFontSize(FONT_SIZE.small);
-      doc.text(date, pageWidth - marginRight, yPosition, { align: 'right' });
-    }
-    yPosition += LINE_HEIGHT.subheading;
-    
-    // Handle multi-line main text
-    for (let i = 1; i < mainLines.length; i++) {
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(FONT_SIZE.subheading);
-      doc.text(mainLines[i], marginLeft, yPosition);
-      yPosition += LINE_HEIGHT.subheading;
-    }
-    
-    // Second row: Subtitle (italic) + Location (right-aligned)
-    if (sub) {
-      doc.setFontSize(FONT_SIZE.subheadingItalic);
-      doc.setFont('helvetica', 'italic');
-      doc.text(sub, marginLeft, yPosition);
-      
-      if (location) {
-        doc.text(location, pageWidth - marginRight, yPosition, { align: 'right' });
-      }
-      yPosition += LINE_HEIGHT.body + 2;
-    }
-  };
-  
-  // Draw bullet point
-  const drawBullet = (text: string, link?: string) => {
-    checkNewPage(15);
-    
-    doc.setFontSize(FONT_SIZE.body);
-    doc.setFont('helvetica', 'normal');
-    doc.setTextColor(...black);
-    
-    const bulletX = marginLeft + 8;
-    const textX = marginLeft + 18;
-    const maxWidth = contentWidth - 18;
-    
-    // Draw bullet
-    doc.text('•', bulletX, yPosition);
-    
-    // Check for inline links
-    const urlRegex = /(https?:\/\/[^\s]+)/g;
-    let textToDraw = text;
-    let inlineLink: string | null = null;
-    
-    if (link || urlRegex.test(text)) {
-      const urlMatch = text.match(urlRegex);
-      if (urlMatch) {
-        inlineLink = urlMatch[0];
-        textToDraw = text.replace(urlRegex, '').trim();
-      }
-    }
-    
-    // Wrap and draw text
-    const lines = doc.splitTextToSize(textToDraw, maxWidth);
-    lines.forEach((line: string, idx: number) => {
-      if (idx > 0) {
-        checkNewPage(LINE_HEIGHT.bullet);
-      }
-      doc.text(line, textX, yPosition);
-      yPosition += LINE_HEIGHT.bullet;
-    });
-    
-    // Draw link on new line if present
-    if (inlineLink) {
-      checkNewPage(LINE_HEIGHT.bullet);
-      doc.setFontSize(FONT_SIZE.small);
-      const linkX = textX + 5;
-      drawLink(inlineLink, inlineLink, linkX, yPosition);
-      yPosition += LINE_HEIGHT.bullet;
-    }
-    
-    yPosition += 1;
-  };
-  
-  // Process sections
-  for (const section of sections) {
-    switch (section.type) {
-      case 'header':
-        doc.setFontSize(FONT_SIZE.name);
+
+  // ── Render ───────────────────────────────────────────────────────────────────
+
+  const parsed = parseResume(resumeText);
+
+  for (const item of parsed) {
+    switch (item.type) {
+
+      // ── NAME ───────────────────────────────────────────────────────────────
+      case 'name': {
+        newPageIfNeeded(LH.name + 6);
+        doc.setFontSize(FS.name);
         doc.setFont('helvetica', 'bold');
-        doc.setTextColor(...black);
-        doc.text(section.content, pageWidth / 2, yPosition, { align: 'center' });
-        yPosition += LINE_HEIGHT.name;
+        rgb(BLACK);
+        doc.text(item.text, PW / 2, y, { align: 'center' });
+        y += LH.name;
         break;
-        
-      case 'contact':
-        doc.setFontSize(FONT_SIZE.contact);
+      }
+
+      // ── CONTACT ────────────────────────────────────────────────────────────
+      // FIX 2: Set font size BEFORE calling getTextWidth so measurements are
+      // accurate. Previously the font might have been at a different size from
+      // the previous element, causing totalW to be wrong and the line to start
+      // too far left, overflowing the right margin (Image 1 bug).
+      case 'contact': {
+        newPageIfNeeded(LH.contact + 4);
+
+        // Set font FIRST so getTextWidth uses the correct size
+        doc.setFontSize(FS.contact);
         doc.setFont('helvetica', 'normal');
-        
-        // Parse and format contact info
-        let contactText = section.content
-          .replace(/\$\|\$/g, ' | ')
-          .replace(/\\href\{[^}]+\}\{\\underline\{([^}]+)\}\}/g, '$1')
-          .replace(/\s+/g, ' ')
-          .trim();
-        
-        // Split by pipe and process each part
-        const contactParts = contactText.split(/\s*\|\s*/);
-        let currentX = marginLeft;
-        let lineY = yPosition;
-        const spacing = 8;
-        
-        // Calculate total width to center
-        let totalWidth = 0;
-        contactParts.forEach((part, idx) => {
-          const cleanPart = part.replace(/^(Phone|Email|LinkedIn|GitHub):\s*/i, '');
-          totalWidth += doc.getTextWidth(cleanPart);
-          if (idx < contactParts.length - 1) {
-            totalWidth += doc.getTextWidth(' | ') + spacing;
-          }
-        });
-        
-        currentX = (pageWidth - totalWidth) / 2;
-        
-        contactParts.forEach((part, idx) => {
-          const isUrl = part.includes('http') || part.includes('linkedin') || part.includes('github');
-          let displayText = part.replace(/^(Phone|Email|LinkedIn|GitHub):\s*/i, '');
-          const urlMatch = part.match(/https?:\/\/[^\s]+/);
-          
-          if (isUrl && urlMatch) {
-            const linkWidth = drawLink(displayText.replace(urlMatch[0], urlMatch[0]), urlMatch[0], currentX, lineY);
-            currentX += linkWidth;
+
+        const parts = item.text
+          .split(/\s*\|\s*|\s{2,}/)
+          .map(p => p.replace(/^(Phone|Email|LinkedIn|GitHub|Location):\s*/i, '').trim())
+          .filter(Boolean);
+
+        const SEP = '  |  ';
+        const sepW = doc.getTextWidth(SEP);
+
+        // FIX 2 cont: measure AFTER font is set
+        let totalW = 0;
+        for (let k = 0; k < parts.length; k++) {
+          totalW += doc.getTextWidth(parts[k]);
+          if (k < parts.length - 1) totalW += sepW;
+        }
+
+        // FIX 3: Clamp cx so line can never overflow the right margin.
+        // If the contact line is too wide for the page, fall back to ML.
+        let cx = Math.max(ML, (PW - totalW) / 2);
+        // Verify it fits; if not, scale approach: just start at ML and let it wrap
+        if (cx + totalW > PW - MR + 2) {
+          cx = ML;
+        }
+
+        for (let k = 0; k < parts.length; k++) {
+          const part = parts[k];
+
+          // FIX 4: Re-set font before each getTextWidth call to ensure
+          // measurements stay consistent throughout the loop
+          doc.setFontSize(FS.contact);
+          doc.setFont('helvetica', 'normal');
+
+          const isLink = /https?:\/\/|linkedin\.com|github\.com/i.test(part);
+
+          if (isLink) {
+            const url = /https?:\/\//.test(part) ? part : `https://${part}`;
+            rgb(BLUE);
+            doc.text(part, cx, y);
+            const pw = doc.getTextWidth(part);
+            doc.setDrawColor(BLUE[0], BLUE[1], BLUE[2]);
+            doc.setLineWidth(0.4);
+            doc.line(cx, y + 1.5, cx + pw, y + 1.5);
+            linkAnnotations.push({ x: cx, y: y - 9, w: pw, h: 11, url });
+            rgb(BLACK);
+            cx += pw;
           } else {
-            doc.setTextColor(...black);
-            doc.text(displayText, currentX, lineY);
-            currentX += doc.getTextWidth(displayText);
+            rgb(DARK);
+            doc.text(part, cx, y);
+            cx += doc.getTextWidth(part);
+            rgb(BLACK);
           }
-          
-          if (idx < contactParts.length - 1) {
-            doc.setTextColor(...black);
-            doc.text(' | ', currentX, lineY);
-            currentX += doc.getTextWidth(' | ') + spacing / 2;
+
+          if (k < parts.length - 1) {
+            rgb(GRAY);
+            doc.text(SEP, cx, y);
+            rgb(BLACK);
+            cx += sepW;
           }
-        });
-        
-        yPosition += LINE_HEIGHT.contact + 4;
+        }
+
+        y += LH.contact + 3;
         break;
-        
-      case 'section-title':
-        drawSectionTitle(section.content);
-        break;
-        
-      case 'objective':
-        checkNewPage(20);
-        doc.setFontSize(FONT_SIZE.body);
-        doc.setFont('helvetica', 'normal');
-        doc.setTextColor(...black);
-        
-        const objLines = doc.splitTextToSize(section.content, contentWidth);
-        objLines.forEach((line: string) => {
-          checkNewPage(LINE_HEIGHT.body);
-          doc.text(line, marginLeft, yPosition);
-          yPosition += LINE_HEIGHT.body;
-        });
-        yPosition += 4;
-        break;
-        
-      case 'education-entry':
-      case 'experience-entry':
-        const parts = section.content.split(/[,]/).map(p => p.trim());
-        const location = parts.length > 1 && parts[parts.length - 1].length < 30 ? parts[parts.length - 1] : undefined;
-        const institution = location ? parts.slice(0, -1).join(', ') : section.content;
-        
-        drawEntry(
-          institution,
-          section.date,
-          section.subContent,
-          location
-        );
-        break;
-        
-      case 'project-entry':
-        checkNewPage(20);
-        
-        doc.setFontSize(FONT_SIZE.subheading);
+      }
+
+      // ── SECTION HEADER ─────────────────────────────────────────────────────
+      case 'section': {
+        newPageIfNeeded(LH.section + 12);
+        y += 8;
+        doc.setFontSize(FS.section);
         doc.setFont('helvetica', 'bold');
-        doc.setTextColor(...black);
-        
-        const projectTitle = section.content;
-        const maxTitleWidth = section.date ? contentWidth - 90 : contentWidth;
-        const titleLines = doc.splitTextToSize(projectTitle, maxTitleWidth);
-        doc.text(titleLines[0], marginLeft, yPosition);
-        
-        if (section.date) {
+        rgb(BLACK);
+        doc.text(item.text, ML, y);
+        y += 4;
+        drawHRule();
+        y += 5;
+        break;
+      }
+
+      // ── ENTRY (Experience / Education / Project) ────────────────────────────
+      case 'entry-main': {
+        newPageIfNeeded(LH.bold + (item.sub ? LH.italic : 0) + 6);
+
+        const dateStr = item.date ?? '';
+
+        // Measure date width at small size so title max-width is calculated correctly
+        let dateW = 0;
+        if (dateStr) {
+          doc.setFontSize(FS.small);
           doc.setFont('helvetica', 'normal');
-          doc.setFontSize(FONT_SIZE.small);
-          doc.text(section.date, pageWidth - marginRight, yPosition, { align: 'right' });
+          dateW = doc.getTextWidth(dateStr) + 8; // 8pt padding
         }
-        yPosition += LINE_HEIGHT.subheading + 2;
-        break;
-        
-      case 'technologies':
-        checkNewPage(15);
-        doc.setFontSize(FONT_SIZE.body);
-        doc.setFont('helvetica', 'italic');
-        doc.setTextColor(80, 80, 80);
-        
-        const techText = 'Technologies: ' + section.content;
-        const techLines = doc.splitTextToSize(techText, contentWidth - 10);
-        techLines.forEach((line: string) => {
-          doc.text(line, marginLeft + 5, yPosition);
-          yPosition += LINE_HEIGHT.body;
-        });
-        doc.setTextColor(...black);
-        yPosition += 2;
-        break;
-        
-      case 'link':
-        checkNewPage(15);
-        doc.setFontSize(FONT_SIZE.small);
-        if (section.link) {
-          drawLink(section.link, section.link, marginLeft + 10, yPosition);
+
+        const titleMaxW = CW - dateW;
+
+        // Draw bold title
+        doc.setFontSize(FS.bold);
+        doc.setFont('helvetica', 'bold');
+        rgb(BLACK);
+        const titleLines = doc.splitTextToSize(item.text, titleMaxW) as string[];
+        doc.text(titleLines[0], ML, y);
+
+        // Draw date right-aligned on same baseline as title
+        if (dateStr) {
+          doc.setFontSize(FS.small);
+          doc.setFont('helvetica', 'normal');
+          rgb(GRAY);
+          doc.text(dateStr, PW - MR, y, { align: 'right' });
+          rgb(BLACK);
         }
-        yPosition += LINE_HEIGHT.body + 2;
-        break;
-        
-      case 'bullet':
-        drawBullet(section.content, section.link);
-        break;
-        
-      case 'skills':
-        checkNewPage(15);
-        doc.setFontSize(FONT_SIZE.body);
-        
-        const skillMatch = section.content.match(/^([^:]+):\s*(.+)$/);
-        if (skillMatch) {
+
+        y += LH.bold;
+
+        // Additional title wrap lines
+        for (let ti = 1; ti < titleLines.length; ti++) {
+          doc.setFontSize(FS.bold);
           doc.setFont('helvetica', 'bold');
-          const label = skillMatch[1] + ': ';
-          doc.text(label, marginLeft, yPosition);
-          
-          const boldWidth = doc.getTextWidth(label);
-          doc.setFont('helvetica', 'normal');
-          
-          const remainingWidth = contentWidth - boldWidth;
-          const skillLines = doc.splitTextToSize(skillMatch[2], remainingWidth);
-          
-          skillLines.forEach((line: string, idx: number) => {
-            if (idx === 0) {
-              doc.text(line, marginLeft + boldWidth, yPosition);
-            } else {
-              yPosition += LINE_HEIGHT.body;
-              checkNewPage(LINE_HEIGHT.body);
-              doc.text(line, marginLeft + boldWidth, yPosition);
-            }
-          });
-        } else {
-          doc.setFont('helvetica', 'normal');
-          const lines = doc.splitTextToSize(section.content, contentWidth);
-          lines.forEach((line: string) => {
-            doc.text(line, marginLeft, yPosition);
-            yPosition += LINE_HEIGHT.body;
-          });
-          yPosition -= LINE_HEIGHT.body;
+          rgb(BLACK);
+          doc.text(titleLines[ti], ML, y);
+          y += LH.bold;
         }
-        yPosition += LINE_HEIGHT.body + 3;
+
+        // Subtitle (italic)
+        if (item.sub) {
+          doc.setFontSize(FS.italic);
+          doc.setFont('helvetica', 'italic');
+          rgb(GRAY);
+          const subLines = doc.splitTextToSize(item.sub, CW) as string[];
+          subLines.forEach(sl => {
+            newPageIfNeeded(LH.italic);
+            doc.text(sl, ML, y);
+            y += LH.italic;
+          });
+          rgb(BLACK);
+        }
+
+        y += 3;
         break;
-        
-      case 'certification':
-        checkNewPage(15);
-        doc.setFontSize(FONT_SIZE.body);
+      }
+
+      // ── BULLET ─────────────────────────────────────────────────────────────
+      // FIX 5: Bullet dot must be drawn at the SAME y as the first text line.
+      // Previously the dot was drawn, then the forEach loop started — but the
+      // loop draws text at y and then advances y, so the dot and the first line
+      // were on the same baseline (correct). However, for multi-line bullets,
+      // every continuation line needs a page-break check BEFORE drawing.
+      case 'bullet': {
+        const BX = ML + 9;
+        const TX = ML + 18;
+        const TW = CW - 18;
+
+        doc.setFontSize(FS.body);
         doc.setFont('helvetica', 'normal');
-        doc.setTextColor(...black);
-        
-        doc.text('•', marginLeft + 8, yPosition);
-        const certLines = doc.splitTextToSize(section.content, contentWidth - 18);
-        certLines.forEach((line: string, idx: number) => {
-          doc.text(line, marginLeft + 18, yPosition);
-          if (idx < certLines.length - 1) {
-            yPosition += LINE_HEIGHT.body;
-            checkNewPage(LINE_HEIGHT.body);
+        rgb(BLACK);
+
+        const bLines = doc.splitTextToSize(item.text, TW) as string[];
+
+        bLines.forEach((bl, bi) => {
+          newPageIfNeeded(LH.bullet + 1);
+          rgb(BLACK);
+          if (bi === 0) {
+            // Draw bullet dot on the same line as first text
+            doc.text('•', BX, y);
           }
+          doc.text(bl, TX, y);
+          y += LH.bullet;
         });
-        yPosition += LINE_HEIGHT.body + 2;
+
+        y += 2; // micro-gap after bullet group
         break;
-        
-      case 'achievement':
-        checkNewPage(20);
-        doc.setFontSize(FONT_SIZE.body);
+      }
+
+      // ── SKILLS ROW ─────────────────────────────────────────────────────────
+      // FIX 6: The original code advanced y inside the vLines loop for vi > 0,
+      // then did y += LH.body + 2 unconditionally at the end.
+      // For a single-line value this was fine, but for multi-line values the
+      // last line already advanced y inside the loop, so the final += double-
+      // spaced after every multi-line skills row.
+      // Fix: track whether we advanced inside the loop and skip the trailing add.
+      case 'skills-row': {
+        doc.setFontSize(FS.body);
+        const colonIdx = item.text.indexOf(':');
+
+        if (colonIdx > 0 && colonIdx < 40) {
+          const label = item.text.slice(0, colonIdx + 1) + ' ';
+          const value = item.text.slice(colonIdx + 1).trim();
+
+          doc.setFont('helvetica', 'bold');
+          rgb(BLACK);
+          const lw = doc.getTextWidth(label);
+
+          doc.setFont('helvetica', 'normal');
+          rgb(DARK);
+          const vLines = doc.splitTextToSize(value, CW - lw) as string[];
+
+          vLines.forEach((vl, vi) => {
+            newPageIfNeeded(LH.body + 2);
+            if (vi === 0) {
+              // Draw label and first value on same line
+              doc.setFont('helvetica', 'bold');
+              rgb(BLACK);
+              doc.text(label, ML, y);
+              doc.setFont('helvetica', 'normal');
+              rgb(DARK);
+              doc.text(vl, ML + lw, y);
+            } else {
+              // Continuation lines — indent to align with value column
+              doc.text(vl, ML + lw, y);
+            }
+            y += LH.body;
+          });
+
+          // FIX 6: only add trailing gap, NOT another full LH.body
+          y += 2;
+        } else {
+          // No colon — plain text row
+          doc.setFont('helvetica', 'normal');
+          rgb(DARK);
+          const tLines = doc.splitTextToSize(item.text, CW) as string[];
+          tLines.forEach(tl => {
+            newPageIfNeeded(LH.body + 2);
+            doc.text(tl, ML, y);
+            y += LH.body;
+          });
+          y += 2;
+        }
+
+        rgb(BLACK);
+        break;
+      }
+
+      // ── GENERIC TEXT ───────────────────────────────────────────────────────
+      case 'text': {
+        doc.setFontSize(FS.body);
         doc.setFont('helvetica', 'normal');
-        doc.setTextColor(...black);
-        
-        doc.text('•', marginLeft + 8, yPosition);
-        const achieveLines = doc.splitTextToSize(section.content, contentWidth - 18);
-        achieveLines.forEach((line: string, idx: number) => {
-          doc.text(line, marginLeft + 18, yPosition);
-          if (idx < achieveLines.length - 1) {
-            yPosition += LINE_HEIGHT.body;
-            checkNewPage(LINE_HEIGHT.body);
-          }
+        rgb(DARK);
+        const txLines = doc.splitTextToSize(item.text, CW) as string[];
+        txLines.forEach(tl => {
+          newPageIfNeeded(LH.body);
+          doc.text(tl, ML, y);
+          y += LH.body;
         });
-        yPosition += LINE_HEIGHT.body + 3;
+        rgb(BLACK);
         break;
-        
-      case 'text':
-        checkNewPage(15);
-        doc.setFontSize(FONT_SIZE.body);
-        doc.setFont('helvetica', 'normal');
-        doc.setTextColor(...black);
-        
-        const textLines = doc.splitTextToSize(section.content, contentWidth);
-        textLines.forEach((line: string) => {
-          doc.text(line, marginLeft, yPosition);
-          yPosition += LINE_HEIGHT.body;
-        });
-        break;
+      }
     }
   }
-  
-  // Add clickable links to the PDF
-  linkPositions.forEach(linkPos => {
-    doc.link(linkPos.x, linkPos.y, linkPos.width, linkPos.height, { url: linkPos.url });
+
+  // ── Clickable link annotations ─────────────────────────────────────────────
+  linkAnnotations.forEach(la => {
+    doc.link(la.x, la.y, la.w, la.h, { url: la.url });
   });
-  
-  // Save the PDF
-  doc.save('tailored-resume.pdf');
+
+  doc.save('resume.pdf');
 }
