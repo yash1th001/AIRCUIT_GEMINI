@@ -5,6 +5,7 @@ from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 import os
 import logging
+import certifi
 import re
 import hashlib
 import asyncio
@@ -33,8 +34,8 @@ ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
 # MongoDB connection
-mongo_url = os.environ['MONGO_URL']
-client = AsyncIOMotorClient(mongo_url)
+mongo_url = os.environ.get('MONGO_URI') or os.environ.get('MONGO_URL')
+client = AsyncIOMotorClient(mongo_url, tlsCAFile=certifi.where(), tlsAllowInvalidCertificates=True)
 db = client[os.environ['DB_NAME']]
 
 # Auth config
@@ -395,6 +396,7 @@ async def analyze_resume(request: ResumeAnalysisRequest):
             resume_text=cleaned_resume,
             job_description=job_description,
             model_name=request.modelName or "gemini-2.5-flash-lite",
+            semantic_score=semantic_score
         )
 
         # Enrich result with research fields
@@ -573,6 +575,7 @@ async def run_analysis_pipeline(
     resume_text: str,
     job_description: Optional[str],
     model_name: str = "gemini-2.5-flash-lite",
+    semantic_score: Optional[float] = None,
 ) -> Dict[str, Any]:
     """Run the complete resume analysis pipeline using Google Gemini."""
     logger.info(f"=== Starting Analysis Pipeline (model={model_name}) ===")
@@ -583,7 +586,7 @@ async def run_analysis_pipeline(
     try:
         if job_description:
             logger.info("[Pipeline] Running analysis with JD ...")
-            final_analysis = await analyze_with_job_description(resume_text, job_description, model_name)
+            final_analysis = await analyze_with_job_description(resume_text, job_description, model_name, semantic_score)
         else:
             logger.info("[Pipeline] Running resume-only analysis ...")
             final_analysis = await analyze_without_job_description(resume_text, model_name)
@@ -600,9 +603,13 @@ async def run_analysis_pipeline(
 
 # ── Step 12: XAI score breakdown in prompts ────────────────────────────────
 
-async def analyze_with_job_description(resume_text: str, job_description: str, model_name: str = "gemini-2.5-flash-lite") -> Dict[str, Any]:
+async def analyze_with_job_description(resume_text: str, job_description: str, model_name: str = "gemini-2.5-flash-lite", semantic_score: Optional[float] = None) -> Dict[str, Any]:
     """Complete analysis with JD — includes scoreBreakdown for XAI."""
     model = get_model(model_name)
+
+    semantic_context = ""
+    if semantic_score is not None:
+        semantic_context = f"\nSEMANTIC SIMILARITY (Cosine Similarity):\nThe system has computed a semantic similarity score of {semantic_score}% between the Resume and Job Description.\n"
 
     prompt = f"""You are an expert ATS analyst and career coach. Analyze this resume against the job description and provide comprehensive feedback.
 
@@ -611,12 +618,12 @@ RESUME:
 
 JOB DESCRIPTION:
 {job_description[:4000]}
-
+{semantic_context}
 Perform a complete analysis and return a JSON object with:
 
 ### Scoring (calculate precisely):
 - ATS Score (0-100): Based on contact info (15), summary (10), experience (15), education (10), skills (10), standard headings (10), plain text (10), action verbs (10), consistent dates (5), single column (5)
-- JD Match Score (0-100): Based on required skills (40), nice-to-have skills (15), experience years (15), certifications (20), keywords (10)
+- JD Match Score (0-100): Based on required skills (30), nice-to-have skills (10), experience years (15), certifications (15), keywords (10), semantic similarity score (20). If the semantic similarity score is provided, heavily factor it into this calculation.
 - Structure Score (0-100): Based on clear headings (15), formatting (10), bullets (15), quantified achievements (15), length (10), white space (15), logical order (10), no typos (10)
 
 ### scoreBreakdown (XAI — REQUIRED):
@@ -661,11 +668,12 @@ Return ONLY valid JSON in this EXACT format:
       {{"criterionName": "singleColumn", "scoreAwarded": <number>, "maxPossible": 5, "evidence": "<why>"}}
     ],
     "jdMatch": [
-      {{"criterionName": "requiredSkills", "scoreAwarded": <number>, "maxPossible": 40, "evidence": "<why>"}},
-      {{"criterionName": "niceToHaveSkills", "scoreAwarded": <number>, "maxPossible": 15, "evidence": "<why>"}},
+      {{"criterionName": "requiredSkills", "scoreAwarded": <number>, "maxPossible": 30, "evidence": "<why>"}},
+      {{"criterionName": "niceToHaveSkills", "scoreAwarded": <number>, "maxPossible": 10, "evidence": "<why>"}},
       {{"criterionName": "experienceYears", "scoreAwarded": <number>, "maxPossible": 15, "evidence": "<why>"}},
-      {{"criterionName": "certifications", "scoreAwarded": <number>, "maxPossible": 20, "evidence": "<why>"}},
-      {{"criterionName": "keywords", "scoreAwarded": <number>, "maxPossible": 10, "evidence": "<why>"}}
+      {{"criterionName": "certifications", "scoreAwarded": <number>, "maxPossible": 15, "evidence": "<why>"}},
+      {{"criterionName": "keywords", "scoreAwarded": <number>, "maxPossible": 10, "evidence": "<why>"}},
+      {{"criterionName": "semanticSimilarity", "scoreAwarded": <number>, "maxPossible": 20, "evidence": "<why>"}}
     ],
     "structure": [
       {{"criterionName": "clearHeadings", "scoreAwarded": <number>, "maxPossible": 15, "evidence": "<why>"}},
