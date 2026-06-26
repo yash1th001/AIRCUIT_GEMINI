@@ -7,6 +7,7 @@ import { ScrollArea } from "./ui/scroll-area";
 import { cn } from "@/lib/utils";
 import { toast } from "@/hooks/use-toast";
 import { AnalysisResult } from "./AnalyzerSection";
+import { getApiBaseUrl } from "@/lib/api";
 
 interface Message {
   role: "user" | "assistant";
@@ -41,8 +42,8 @@ const ResumeChat = ({ resumeText, jobDescription, analysisResults }: ResumeChatP
     setIsLoading(true);
 
     try {
-      const backendUrl = import.meta.env.VITE_APP_BACKEND_URL || 'http://localhost:8001';
-      const response = await fetch(`${backendUrl}/api/analyze-resume`, {
+      const backendUrl = getApiBaseUrl();
+      const response = await fetch(`${backendUrl || "/api"}/analyze-resume`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

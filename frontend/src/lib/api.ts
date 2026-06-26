@@ -1,4 +1,8 @@
-const BASE_URL = "http://localhost:8001/api";
+export function getApiBaseUrl(): string {
+  return import.meta.env.VITE_APP_BACKEND_URL?.trim().replace(/\/$/, "") || "";
+}
+
+const BASE_URL = getApiBaseUrl() || "/api";
 
 function getToken(): string | null {
   return localStorage.getItem("auth_token");

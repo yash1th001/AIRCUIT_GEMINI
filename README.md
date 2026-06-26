@@ -153,6 +153,20 @@ resume-analyzer/
 
 PRs are welcome! Please follow standard code styles (PEP 8 for Python, ESLint/Prettier for React).
 
+## 🚀 Vercel Deployment
+
+This repository is configured so the frontend and FastAPI backend can be deployed together on Vercel.
+
+1. Create a Vercel project from the repository root.
+2. Add the backend environment variables in Vercel:
+	- `MONGO_URL` or `MONGO_URI`
+	- `DB_NAME`
+	- `JWT_SECRET_KEY`
+	- `CORS_ORIGINS` if you want to lock the API to specific domains
+3. Deploy normally. The frontend will call the backend through the same origin at `/api`.
+
+For local development, keep using `VITE_APP_BACKEND_URL=http://localhost:8001` in `frontend/.env`.
+
 ## 📝 License
 
 MIT License.

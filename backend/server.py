@@ -35,8 +35,10 @@ load_dotenv(ROOT_DIR / '.env')
 
 # MongoDB connection
 mongo_url = os.environ.get('MONGO_URI') or os.environ.get('MONGO_URL')
+if not mongo_url:
+    raise RuntimeError('MONGO_URL or MONGO_URI environment variable is required')
 client = AsyncIOMotorClient(mongo_url, tlsCAFile=certifi.where(), tlsAllowInvalidCertificates=True)
-db = client[os.environ['DB_NAME']]
+db = client[os.environ.get('DB_NAME', 'resume_analyzer_db')]
 
 # Auth config
 SECRET_KEY = os.environ.get('JWT_SECRET_KEY', 'aicruit-secret-key-change-in-production-2024')

@@ -9,6 +9,7 @@ import {
 import { Button } from "./ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { cn } from "@/lib/utils";
+import { getApiBaseUrl } from "@/lib/api";
 
 interface BiasVariantResult {
   variant: string;
@@ -42,8 +43,8 @@ const BiasAuditSection = ({
     setIsLoading(true);
     setError(null);
     try {
-      const backendUrl = import.meta.env.VITE_APP_BACKEND_URL || "";
-      const response = await fetch(`${backendUrl}/api/audit-bias`, {
+      const backendUrl = getApiBaseUrl();
+      const response = await fetch(`${backendUrl || "/api"}/audit-bias`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

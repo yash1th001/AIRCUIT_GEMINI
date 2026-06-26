@@ -17,6 +17,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { useProfile } from "@/hooks/use-profile";
 import { extractTextFromPDF, isValidPDFFile } from "@/lib/pdfParser";
 import { analyzeResumeLocally } from "@/lib/localResumeAnalyzer";
+import { getApiBaseUrl } from "@/lib/api";
 
 export interface ScoreBreakdownItem {
   criterionName: string;
@@ -163,7 +164,7 @@ const AnalyzerSection = () => {
         });
       } else {
         // AI-powered analysis using Gemini via backend API
-        const backendUrl = import.meta.env.VITE_APP_BACKEND_URL || '';
+        const backendUrl = getApiBaseUrl();
         
         const requestBody: any = {
           resumeText: finalResumeText,
@@ -179,7 +180,7 @@ const AnalyzerSection = () => {
           throw new Error("Gemini API key is required for AI analysis.");
         }
 
-        const response = await fetch(`${backendUrl}/api/analyze-resume`, {
+        const response = await fetch(`${backendUrl || "/api"}/analyze-resume`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
