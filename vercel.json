@@ -1,21 +1,14 @@
 {
-    "installCommand": "cd frontend && npm install",
-    "buildCommand": "cd frontend && npm run build",
-    "outputDirectory": "frontend/dist",
-    "cleanUrls": true,
-    "rewrites": [
-        {
-            "source": "/api/:path*",
-            "destination": "/api/[...path].py"
+    "experimentalServices": {
+        "frontend": {
+            "entrypoint": "frontend",
+            "routePrefix": "/",
+            "framework": "vite"
         },
-        {
-            "source": "/:path*",
-            "destination": "/index.html"
-        }
-    ],
-    "functions": {
-        "api/[...path].py": {
-            "runtime": "python3.12"
+        "backend": {
+            "entrypoint": "backend/server.py",
+            "routePrefix": "/api",
+            "framework": "fastapi"
         }
     }
 }
