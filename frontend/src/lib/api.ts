@@ -28,15 +28,28 @@ export async function apiFetch(path: string, options: RequestInit = {}): Promise
   return fetch(`${BASE_URL}${path}`, { ...options, headers });
 }
 
+async function handleResponse(res: Response, defaultError: string) {
+  const contentType = res.headers.get("content-type");
+  if (contentType && contentType.includes("application/json")) {
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.detail || defaultError);
+    }
+    return data;
+  } else {
+    // Handle non-JSON responses (like Render 502/504 gateways or 404 HTML pages)
+    console.error(`Received non-JSON response (${res.status})`);
+    throw new Error(`Server Error (${res.status}): Please make sure the backend is running and the backend URL is set correctly in settings.`);
+  }
+}
+
 // Auth API calls
 export async function apiSignUp(email: string, password: string) {
   const res = await apiFetch("/auth/signup", {
     method: "POST",
     body: JSON.stringify({ email, password }),
   });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.detail || "Sign up failed");
-  return data;
+  return handleResponse(res, "Sign up failed");
 }
 
 export async function apiSignIn(email: string, password: string) {
@@ -44,15 +57,17 @@ export async function apiSignIn(email: string, password: string) {
     method: "POST",
     body: JSON.stringify({ email, password }),
   });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.detail || "Sign in failed");
-  return data;
+  return handleResponse(res, "Sign in failed");
 }
 
 export async function apiGetMe() {
   const res = await apiFetch("/auth/me");
   if (!res.ok) return null;
-  return res.json();
+  const contentType = res.headers.get("content-type");
+  if (contentType && contentType.includes("application/json")) {
+    return res.json();
+  }
+  return null;
 }
 
 // Bias audit API
@@ -71,9 +86,7 @@ export async function apiBiasAudit(
       modelName: modelName || "gemini-2.5-flash-lite",
     }),
   });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.detail || "Bias audit failed");
-  return data;
+  return handleResponse(res, "Bias audit failed");
 }
 
 // Analysis history API
@@ -82,7 +95,5 @@ export async function apiFetchAnalyses(mode?: string, limit: number = 100) {
   if (mode) params.set("mode", mode);
   params.set("limit", String(limit));
   const res = await apiFetch(`/analyses?${params.toString()}`);
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.detail || "Failed to fetch analyses");
-  return data;
+  return handleResponse(res, "Failed to fetch analyses");
 }
