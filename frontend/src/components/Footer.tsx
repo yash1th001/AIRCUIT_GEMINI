@@ -1,4 +1,4 @@
-import { FileText, Github, Linkedin, Twitter, Heart } from "lucide-react";
+import { FileText, Github, Linkedin, Twitter } from "lucide-react";
 
 const Footer = () => {
   return (
@@ -20,10 +20,6 @@ const Footer = () => {
               <p className="text-sm text-muted-foreground">Smart Resume Analysis</p>
             </div>
           </a>
-
-          <p className="text-sm text-muted-foreground flex items-center gap-2">
-            Made with <Heart className="w-4 h-4 text-destructive animate-pulse-slow" /> • Powered by LangChain + Gemini AI
-          </p>
 
           <div className="flex items-center gap-3">
             {[
