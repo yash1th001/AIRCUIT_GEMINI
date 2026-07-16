@@ -211,17 +211,46 @@ def strip_pii(text: str) -> str:
 # ── Step 6: Semantic similarity ────────────────────────────────────────────
 
 def compute_semantic_similarity(resume_text: str, job_description: str) -> Optional[float]:
-    """Compute cosine similarity between resume and JD using sentence-transformers.
-    Returns None if sentence-transformers is not installed."""
+    """Compute a lightweight word-overlap cosine similarity between resume and JD in pure Python."""
     try:
-        from sentence_transformers import SentenceTransformer, util
-        model = SentenceTransformer("all-MiniLM-L6-v2")
-        embeddings = model.encode([resume_text[:5000], job_description[:5000]], convert_to_tensor=True)
-        cosine_score = util.cos_sim(embeddings[0], embeddings[1]).item()
-        return round(cosine_score * 100, 2)  # Return as percentage
-    except ImportError:
-        logger.warning("sentence-transformers not installed. Semantic similarity will be null.")
-        return None
+        # Lowercase and tokenize into words
+        def tokenize(text):
+            return re.findall(r'\b\w+\b', text.lower())
+
+        words_resume = tokenize(resume_text)
+        words_jd = tokenize(job_description)
+
+        if not words_resume or not words_jd:
+            return 0.0
+
+        # Count frequencies
+        freq_resume = {}
+        for w in words_resume:
+            freq_resume[w] = freq_resume.get(w, 0) + 1
+
+        freq_jd = {}
+        for w in words_jd:
+            freq_jd[w] = freq_jd.get(w, 0) + 1
+
+        # Calculate cosine similarity
+        all_words = set(freq_resume.keys()).union(set(freq_jd.keys()))
+        
+        dot_product = 0.0
+        norm_resume = 0.0
+        norm_jd = 0.0
+
+        for w in all_words:
+            val_r = freq_resume.get(w, 0)
+            val_j = freq_jd.get(w, 0)
+            dot_product += val_r * val_j
+            norm_resume += val_r ** 2
+            norm_jd += val_j ** 2
+
+        if norm_resume == 0 or norm_jd == 0:
+            return 0.0
+
+        cosine_score = dot_product / ((norm_resume ** 0.5) * (norm_jd ** 0.5))
+        return round(cosine_score * 100, 2)
     except Exception as e:
         logger.error(f"Semantic similarity error: {e}")
         return None
