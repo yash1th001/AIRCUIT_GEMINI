@@ -543,7 +543,7 @@ async def audit_bias(request: BiasAuditRequest):
                 variants.append(BiasVariantResult(variant=label, atsScore=-1))
 
             # Small delay to avoid rate limiting on free tier
-            await asyncio.sleep(2)
+            await asyncio.sleep(3.5)
 
         valid_scores = [v.atsScore for v in variants if v.atsScore >= 0]
         if not valid_scores:
@@ -633,6 +633,21 @@ async def run_analysis_pipeline(
 
 
 # ── Step 12: XAI score breakdown in prompts ────────────────────────────────
+
+async def generate_content_with_retry(model, prompt, max_retries=3, initial_delay=3.0):
+    """Helper to call Gemini API with exponential backoff on rate limits."""
+    delay = initial_delay
+    for attempt in range(max_retries):
+        try:
+            return await model.generate_content_async(prompt)
+        except Exception as e:
+            err_str = str(e).lower()
+            if attempt < max_retries - 1 and ("429" in err_str or "resourceexhausted" in err_str or "503" in err_str or "serviceunavailable" in err_str):
+                logger.warning(f"Gemini API rate limit/temporary error (attempt {attempt+1}/{max_retries}). Retrying in {delay}s...")
+                await asyncio.sleep(delay)
+                delay *= 2  # Exponential backoff
+            else:
+                raise
 
 async def analyze_with_job_description(resume_text: str, job_description: str, model_name: str = "gemini-2.5-flash-lite", semantic_score: Optional[float] = None) -> Dict[str, Any]:
     """Complete analysis with JD — includes scoreBreakdown for XAI."""
@@ -752,7 +767,7 @@ Return ONLY valid JSON in this EXACT format:
 }}"""
 
     try:
-        response = await model.generate_content_async(prompt)
+        response = await generate_content_with_retry(model, prompt)
         return parse_json_response(response.text)
     except Exception as e:
         logger.error(f"Error in complete analysis: {str(e)}")
@@ -860,7 +875,7 @@ Return ONLY valid JSON in this EXACT format:
 }}"""
 
     try:
-        response = await model.generate_content_async(prompt)
+        response = await generate_content_with_retry(model, prompt)
         return parse_json_response(response.text)
     except Exception as e:
         logger.error(f"Error in resume-only analysis: {str(e)}")
