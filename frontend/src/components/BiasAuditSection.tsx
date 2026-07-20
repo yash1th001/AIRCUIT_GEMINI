@@ -51,7 +51,7 @@ const BiasAuditSection = ({
           resumeText,
           jobDescription: jobDescription?.trim() || null,
           geminiApiKey: geminiApiKey?.trim() || null,
-          modelName: "gemini-2.5-flash-lite",
+          modelName: "gemini-1.5-flash",
         }),
       });
 

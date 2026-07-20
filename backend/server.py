@@ -123,7 +123,7 @@ class ResumeAnalysisRequest(BaseModel):
     resumeText: str
     jobDescription: Optional[str] = None
     geminiApiKey: Optional[str] = None
-    modelName: Optional[str] = "gemini-2.5-flash-lite"   # for ablation studies
+    modelName: Optional[str] = "gemini-1.5-flash"   # for ablation studies
     mode: Optional[str] = "normal"                        # "normal" | "ai_analyse"
 
 # ── Step 4: Updated response model ─────────────────────────────────────────
@@ -150,7 +150,7 @@ class BiasAuditRequest(BaseModel):
     resumeText: str
     jobDescription: Optional[str] = None
     geminiApiKey: Optional[str] = None
-    modelName: Optional[str] = "gemini-2.5-flash-lite"
+    modelName: Optional[str] = "gemini-1.5-flash"
 
 class BiasVariantResult(BaseModel):
     variant: str
@@ -426,7 +426,7 @@ async def analyze_resume(request: ResumeAnalysisRequest):
             api_key=api_key,
             resume_text=cleaned_resume,
             job_description=job_description,
-            model_name=request.modelName or "gemini-2.5-flash-lite",
+            model_name=request.modelName or "gemini-1.5-flash",
             semantic_score=semantic_score
         )
 
@@ -442,7 +442,7 @@ async def analyze_resume(request: ResumeAnalysisRequest):
             "analysis_id": analysis_id,
             "prompt_version": PROMPT_VERSION,
             "mode": request.mode or "normal",
-            "model_name": request.modelName or "gemini-2.5-flash-lite",
+            "model_name": request.modelName or "gemini-1.5-flash",
             "ats_score": result.get("atsScore"),
             "jd_match_score": result.get("jdMatchScore"),
             "structure_score": result.get("structureScore"),
@@ -533,7 +533,7 @@ async def audit_bias(request: BiasAuditRequest):
                     api_key=api_key,
                     resume_text=test_resume,
                     job_description=request.jobDescription.strip() if request.jobDescription else None,
-                    model_name=request.modelName or "gemini-2.5-flash-lite",
+                    model_name=request.modelName or "gemini-1.5-flash",
                 )
                 score = result.get("atsScore", 0)
                 variants.append(BiasVariantResult(variant=label, atsScore=score))
@@ -596,7 +596,7 @@ async def get_analyses(
 
 # ── Analysis Pipeline ──────────────────────────────────────────────────────
 
-def get_model(model_name: str = "gemini-2.5-flash-lite"):
+def get_model(model_name: str = "gemini-1.5-flash"):
     """Get the generative model, allowing model selection for ablation."""
     return genai.GenerativeModel(model_name)
 
@@ -605,7 +605,7 @@ async def run_analysis_pipeline(
     api_key: str,
     resume_text: str,
     job_description: Optional[str],
-    model_name: str = "gemini-2.5-flash-lite",
+    model_name: str = "gemini-1.5-flash",
     semantic_score: Optional[float] = None,
 ) -> Dict[str, Any]:
     """Run the complete resume analysis pipeline using Google Gemini."""
@@ -649,7 +649,7 @@ async def generate_content_with_retry(model, prompt, max_retries=3, initial_dela
             else:
                 raise
 
-async def analyze_with_job_description(resume_text: str, job_description: str, model_name: str = "gemini-2.5-flash-lite", semantic_score: Optional[float] = None) -> Dict[str, Any]:
+async def analyze_with_job_description(resume_text: str, job_description: str, model_name: str = "gemini-1.5-flash", semantic_score: Optional[float] = None) -> Dict[str, Any]:
     """Complete analysis with JD — includes scoreBreakdown for XAI."""
     model = get_model(model_name)
 
@@ -774,7 +774,7 @@ Return ONLY valid JSON in this EXACT format:
         raise
 
 
-async def analyze_without_job_description(resume_text: str, model_name: str = "gemini-2.5-flash-lite") -> Dict[str, Any]:
+async def analyze_without_job_description(resume_text: str, model_name: str = "gemini-1.5-flash") -> Dict[str, Any]:
     """Resume-only analysis — includes scoreBreakdown for XAI."""
     model = get_model(model_name)
 

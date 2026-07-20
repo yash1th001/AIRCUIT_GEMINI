@@ -170,7 +170,7 @@ const AnalyzerSection = () => {
           resumeText: finalResumeText,
           jobDescription: jobDescription.trim() || null,
           mode: "ai_analyse",
-          modelName: "gemini-2.5-flash-lite",
+          modelName: "gemini-1.5-flash",
         };
 
         // If user has provided their own Gemini API key, use it

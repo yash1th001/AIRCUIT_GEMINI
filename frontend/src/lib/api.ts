@@ -83,7 +83,7 @@ export async function apiBiasAudit(
       resumeText,
       jobDescription: jobDescription || null,
       geminiApiKey: geminiApiKey || null,
-      modelName: modelName || "gemini-2.5-flash-lite",
+      modelName: modelName || "gemini-1.5-flash",
     }),
   });
   return handleResponse(res, "Bias audit failed");
