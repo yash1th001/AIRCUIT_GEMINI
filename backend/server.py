@@ -596,8 +596,16 @@ async def get_analyses(
 
 # ── Analysis Pipeline ──────────────────────────────────────────────────────
 
+# Priority-ordered list of fallback models. We try the first available one.
+MODEL_FALLBACK_CHAIN = [
+    "gemini-1.5-flash",
+    "gemini-1.5-flash-latest",
+    "gemini-1.5-pro",
+    "gemini-pro",
+]
+
 def get_model(model_name: str = "gemini-1.5-flash"):
-    """Get the generative model, allowing model selection for ablation."""
+    """Get the generative model by name."""
     return genai.GenerativeModel(model_name)
 
 
@@ -608,28 +616,44 @@ async def run_analysis_pipeline(
     model_name: str = "gemini-1.5-flash",
     semantic_score: Optional[float] = None,
 ) -> Dict[str, Any]:
-    """Run the complete resume analysis pipeline using Google Gemini."""
-    logger.info(f"=== Starting Analysis Pipeline (model={model_name}) ===")
-    logger.info(f"JD provided: {bool(job_description)}")
-
+    """Run the complete resume analysis pipeline using Google Gemini.
+    Automatically falls back through MODEL_FALLBACK_CHAIN if the requested
+    model is not available for this API key / region.
+    """
     genai.configure(api_key=api_key)
 
-    try:
-        if job_description:
-            logger.info("[Pipeline] Running analysis with JD ...")
-            final_analysis = await analyze_with_job_description(resume_text, job_description, model_name, semantic_score)
-        else:
-            logger.info("[Pipeline] Running resume-only analysis ...")
-            final_analysis = await analyze_without_job_description(resume_text, model_name)
+    # Build the list of models to try: requested model first, then fallbacks
+    models_to_try = [model_name] + [m for m in MODEL_FALLBACK_CHAIN if m != model_name]
 
-        logger.info("=== Pipeline Complete ===")
-        return final_analysis
+    last_error = None
+    for current_model in models_to_try:
+        logger.info(f"=== Starting Analysis Pipeline (model={current_model}) ===")
+        logger.info(f"JD provided: {bool(job_description)}")
+        try:
+            if job_description:
+                logger.info("[Pipeline] Running analysis with JD ...")
+                final_analysis = await analyze_with_job_description(resume_text, job_description, current_model, semantic_score)
+            else:
+                logger.info("[Pipeline] Running resume-only analysis ...")
+                final_analysis = await analyze_without_job_description(resume_text, current_model)
 
-    except Exception as e:
-        logger.error(f"Pipeline error: {str(e)}", exc_info=True)
-        if "404" in str(e) and "models/" in str(e):
-            logger.error("Model not found — may be regional or key issue.")
-        raise
+            logger.info(f"=== Pipeline Complete (model={current_model}) ===")
+            return final_analysis
+
+        except Exception as e:
+            err_str = str(e)
+            last_error = e
+            # Only fall back if the model itself is unavailable (404); re-raise other errors
+            if "404" in err_str and "models/" in err_str:
+                logger.warning(f"Model '{current_model}' not available, trying next fallback...")
+                continue
+            # For all other errors (rate limit, parse error, etc.) raise immediately
+            logger.error(f"Pipeline error: {err_str}", exc_info=True)
+            raise
+
+    # All models exhausted
+    logger.error("All models in fallback chain failed.")
+    raise last_error
 
 
 # ── Step 12: XAI score breakdown in prompts ────────────────────────────────
