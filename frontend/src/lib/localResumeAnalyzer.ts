@@ -114,7 +114,7 @@ function detectSections(text: string): { name: string; present: boolean; quality
     { name: "Contact Information", patterns: ['email', 'phone', 'linkedin', '@', 'tel:'] },
     { name: "Professional Summary", patterns: ['summary', 'objective', 'profile', 'about me'] },
     { name: "Work Experience", patterns: ['experience', 'employment', 'work history', 'professional experience'] },
-    { name: "Skills", patterns: ['skills', 'competencies', 'technical skills', 'core competencies'] },
+    { name: "Skills", patterns: ['skills', 'skill', 'competencies', 'technical skills', 'core competencies'] },
     { name: "Education", patterns: ['education', 'academic', 'degree', 'university', 'college'] },
     { name: "Certifications", patterns: ['certification', 'certified', 'certificate', 'license'] }
   ];
@@ -171,7 +171,7 @@ function calculateATSScore(resumeText: string): { score: number; details: string
   }
   
   // Check for skills section (10 points)
-  if (textLower.includes('skills')) {
+  if (textLower.includes('skills') || textLower.includes('skill')) {
     score += 10;
     details.push("✓ Skills section found");
   }
