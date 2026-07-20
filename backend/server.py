@@ -16,7 +16,8 @@ from collections import OrderedDict
 import uuid
 from datetime import datetime, timedelta
 import json
-import google.generativeai as genai
+from google import genai
+from google.genai.errors import ClientError
 from passlib.context import CryptContext
 from jose import JWTError, jwt
 
@@ -123,7 +124,7 @@ class ResumeAnalysisRequest(BaseModel):
     resumeText: str
     jobDescription: Optional[str] = None
     geminiApiKey: Optional[str] = None
-    modelName: Optional[str] = "gemini-1.5-flash"   # for ablation studies
+    modelName: Optional[str] = "gemini-2.5-flash"   # for ablation studies
     mode: Optional[str] = "normal"                        # "normal" | "ai_analyse"
 
 # ── Step 4: Updated response model ─────────────────────────────────────────
@@ -150,7 +151,7 @@ class BiasAuditRequest(BaseModel):
     resumeText: str
     jobDescription: Optional[str] = None
     geminiApiKey: Optional[str] = None
-    modelName: Optional[str] = "gemini-1.5-flash"
+    modelName: Optional[str] = "gemini-2.5-flash"
 
 class BiasVariantResult(BaseModel):
     variant: str
@@ -426,7 +427,7 @@ async def analyze_resume(request: ResumeAnalysisRequest):
             api_key=api_key,
             resume_text=cleaned_resume,
             job_description=job_description,
-            model_name=request.modelName or "gemini-1.5-flash",
+            model_name=request.modelName or "gemini-2.5-flash",
             semantic_score=semantic_score
         )
 
@@ -442,7 +443,7 @@ async def analyze_resume(request: ResumeAnalysisRequest):
             "analysis_id": analysis_id,
             "prompt_version": PROMPT_VERSION,
             "mode": request.mode or "normal",
-            "model_name": request.modelName or "gemini-1.5-flash",
+            "model_name": request.modelName or "gemini-2.5-flash",
             "ats_score": result.get("atsScore"),
             "jd_match_score": result.get("jdMatchScore"),
             "structure_score": result.get("structureScore"),
@@ -508,7 +509,6 @@ async def audit_bias(request: BiasAuditRequest):
             raise HTTPException(status_code=400, detail="Gemini API key is required for bias audit.")
 
         api_key = request.geminiApiKey.strip()
-        genai.configure(api_key=api_key)
 
         name_variants = [
             ("Western Male", "John Smith"),
@@ -533,7 +533,7 @@ async def audit_bias(request: BiasAuditRequest):
                     api_key=api_key,
                     resume_text=test_resume,
                     job_description=request.jobDescription.strip() if request.jobDescription else None,
-                    model_name=request.modelName or "gemini-1.5-flash",
+                    model_name=request.modelName or "gemini-2.5-flash",
                 )
                 score = result.get("atsScore", 0)
                 variants.append(BiasVariantResult(variant=label, atsScore=score))
@@ -597,30 +597,34 @@ async def get_analyses(
 # ── Analysis Pipeline ──────────────────────────────────────────────────────
 
 # Priority-ordered list of fallback models. We try the first available one.
+# NOTE: gemini-1.5-* and gemini-pro were fully retired by Google in 2026 and
+# always 404. These are the currently supported, GA model IDs (verified against
+# https://ai.google.dev/gemini-api/docs/models as of July 2026).
 MODEL_FALLBACK_CHAIN = [
-    "gemini-1.5-flash",
-    "gemini-1.5-flash-latest",
-    "gemini-1.5-pro",
-    "gemini-pro",
+    "gemini-2.5-flash",       # best price/performance, reasoning-capable, GA
+    "gemini-2.5-flash-lite",  # fastest/cheapest 2.5-family fallback, GA
+    "gemini-3.5-flash",       # newest GA flagship, no shutdown date announced
+    "gemini-2.5-pro",         # highest-quality fallback for complex cases
 ]
 
-def get_model(model_name: str = "gemini-1.5-flash"):
-    """Get the generative model by name."""
-    return genai.GenerativeModel(model_name)
+
+def get_client(api_key: str) -> genai.Client:
+    """Create a Gen AI client bound to the caller-supplied API key."""
+    return genai.Client(api_key=api_key)
 
 
 async def run_analysis_pipeline(
     api_key: str,
     resume_text: str,
     job_description: Optional[str],
-    model_name: str = "gemini-1.5-flash",
+    model_name: str = "gemini-2.5-flash",
     semantic_score: Optional[float] = None,
 ) -> Dict[str, Any]:
     """Run the complete resume analysis pipeline using Google Gemini.
     Automatically falls back through MODEL_FALLBACK_CHAIN if the requested
     model is not available for this API key / region.
     """
-    genai.configure(api_key=api_key)
+    client = get_client(api_key)
 
     # Build the list of models to try: requested model first, then fallbacks
     models_to_try = [model_name] + [m for m in MODEL_FALLBACK_CHAIN if m != model_name]
@@ -632,10 +636,10 @@ async def run_analysis_pipeline(
         try:
             if job_description:
                 logger.info("[Pipeline] Running analysis with JD ...")
-                final_analysis = await analyze_with_job_description(resume_text, job_description, current_model, semantic_score)
+                final_analysis = await analyze_with_job_description(client, resume_text, job_description, current_model, semantic_score)
             else:
                 logger.info("[Pipeline] Running resume-only analysis ...")
-                final_analysis = await analyze_without_job_description(resume_text, current_model)
+                final_analysis = await analyze_without_job_description(client, resume_text, current_model)
 
             logger.info(f"=== Pipeline Complete (model={current_model}) ===")
             return final_analysis
@@ -644,7 +648,11 @@ async def run_analysis_pipeline(
             err_str = str(e)
             last_error = e
             # Only fall back if the model itself is unavailable (404); re-raise other errors
-            if "404" in err_str and "models/" in err_str:
+            is_model_not_found = (
+                (isinstance(e, ClientError) and getattr(e, "code", None) == 404)
+                or ("404" in err_str and ("models/" in err_str or "NOT_FOUND" in err_str))
+            )
+            if is_model_not_found:
                 logger.warning(f"Model '{current_model}' not available, trying next fallback...")
                 continue
             # For all other errors (rate limit, parse error, etc.) raise immediately
@@ -658,12 +666,12 @@ async def run_analysis_pipeline(
 
 # ── Step 12: XAI score breakdown in prompts ────────────────────────────────
 
-async def generate_content_with_retry(model, prompt, max_retries=3, initial_delay=3.0):
+async def generate_content_with_retry(client: genai.Client, model_name: str, prompt: str, max_retries=3, initial_delay=3.0):
     """Helper to call Gemini API with exponential backoff on rate limits."""
     delay = initial_delay
     for attempt in range(max_retries):
         try:
-            return await model.generate_content_async(prompt)
+            return await client.aio.models.generate_content(model=model_name, contents=prompt)
         except Exception as e:
             err_str = str(e).lower()
             if attempt < max_retries - 1 and ("429" in err_str or "resourceexhausted" in err_str or "503" in err_str or "serviceunavailable" in err_str):
@@ -673,9 +681,8 @@ async def generate_content_with_retry(model, prompt, max_retries=3, initial_dela
             else:
                 raise
 
-async def analyze_with_job_description(resume_text: str, job_description: str, model_name: str = "gemini-1.5-flash", semantic_score: Optional[float] = None) -> Dict[str, Any]:
+async def analyze_with_job_description(client: genai.Client, resume_text: str, job_description: str, model_name: str = "gemini-2.5-flash", semantic_score: Optional[float] = None) -> Dict[str, Any]:
     """Complete analysis with JD — includes scoreBreakdown for XAI."""
-    model = get_model(model_name)
 
     semantic_context = ""
     if semantic_score is not None:
@@ -791,16 +798,15 @@ Return ONLY valid JSON in this EXACT format:
 }}"""
 
     try:
-        response = await generate_content_with_retry(model, prompt)
+        response = await generate_content_with_retry(client, model_name, prompt)
         return parse_json_response(response.text)
     except Exception as e:
         logger.error(f"Error in complete analysis: {str(e)}")
         raise
 
 
-async def analyze_without_job_description(resume_text: str, model_name: str = "gemini-1.5-flash") -> Dict[str, Any]:
+async def analyze_without_job_description(client: genai.Client, resume_text: str, model_name: str = "gemini-2.5-flash") -> Dict[str, Any]:
     """Resume-only analysis — includes scoreBreakdown for XAI."""
-    model = get_model(model_name)
 
     prompt = f"""You are an expert ATS analyst. Analyze this resume and provide comprehensive feedback.
 
@@ -899,7 +905,7 @@ Return ONLY valid JSON in this EXACT format:
 }}"""
 
     try:
-        response = await generate_content_with_retry(model, prompt)
+        response = await generate_content_with_retry(client, model_name, prompt)
         return parse_json_response(response.text)
     except Exception as e:
         logger.error(f"Error in resume-only analysis: {str(e)}")
