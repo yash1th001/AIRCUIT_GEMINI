@@ -262,7 +262,7 @@ export async function generateResumePdf(resumeText: string): Promise<void> {
       case 'name': {
         newPageIfNeeded(LH.name + 6);
         doc.setFontSize(FS.name);
-        doc.setFont('helvetica', 'bold');
+        doc.setFont('times', 'bold');
         rgb(BLACK);
         doc.text(item.text, PW / 2, y, { align: 'center' });
         y += LH.name;
@@ -279,7 +279,7 @@ export async function generateResumePdf(resumeText: string): Promise<void> {
 
         // Set font FIRST so getTextWidth uses the correct size
         doc.setFontSize(FS.contact);
-        doc.setFont('helvetica', 'normal');
+        doc.setFont('times', 'normal');
 
         const parts = item.text
           .split(/\s*\|\s*|\s{2,}/)
@@ -310,7 +310,7 @@ export async function generateResumePdf(resumeText: string): Promise<void> {
           // FIX 4: Re-set font before each getTextWidth call to ensure
           // measurements stay consistent throughout the loop
           doc.setFontSize(FS.contact);
-          doc.setFont('helvetica', 'normal');
+          doc.setFont('times', 'normal');
 
           const isLink = /https?:\/\/|linkedin\.com|github\.com/i.test(part);
 
@@ -349,7 +349,7 @@ export async function generateResumePdf(resumeText: string): Promise<void> {
         newPageIfNeeded(LH.section + 12);
         y += 8;
         doc.setFontSize(FS.section);
-        doc.setFont('helvetica', 'bold');
+        doc.setFont('times', 'bold');
         rgb(BLACK);
         doc.text(item.text, ML, y);
         y += 4;
@@ -368,7 +368,7 @@ export async function generateResumePdf(resumeText: string): Promise<void> {
         let dateW = 0;
         if (dateStr) {
           doc.setFontSize(FS.small);
-          doc.setFont('helvetica', 'normal');
+          doc.setFont('times', 'normal');
           dateW = doc.getTextWidth(dateStr) + 8; // 8pt padding
         }
 
@@ -376,7 +376,7 @@ export async function generateResumePdf(resumeText: string): Promise<void> {
 
         // Draw bold title
         doc.setFontSize(FS.bold);
-        doc.setFont('helvetica', 'bold');
+        doc.setFont('times', 'bold');
         rgb(BLACK);
         const titleLines = doc.splitTextToSize(item.text, titleMaxW) as string[];
         doc.text(titleLines[0], ML, y);
@@ -384,7 +384,7 @@ export async function generateResumePdf(resumeText: string): Promise<void> {
         // Draw date right-aligned on same baseline as title
         if (dateStr) {
           doc.setFontSize(FS.small);
-          doc.setFont('helvetica', 'normal');
+          doc.setFont('times', 'normal');
           rgb(GRAY);
           doc.text(dateStr, PW - MR, y, { align: 'right' });
           rgb(BLACK);
@@ -395,23 +395,35 @@ export async function generateResumePdf(resumeText: string): Promise<void> {
         // Additional title wrap lines
         for (let ti = 1; ti < titleLines.length; ti++) {
           doc.setFontSize(FS.bold);
-          doc.setFont('helvetica', 'bold');
+          doc.setFont('times', 'bold');
           rgb(BLACK);
           doc.text(titleLines[ti], ML, y);
           y += LH.bold;
         }
 
-        // Subtitle (italic)
+        // Subtitle (italic / LaTeX company & location alignment)
         if (item.sub) {
           doc.setFontSize(FS.italic);
-          doc.setFont('helvetica', 'italic');
           rgb(GRAY);
-          const subLines = doc.splitTextToSize(item.sub, CW) as string[];
-          subLines.forEach(sl => {
+          
+          const subParts = item.sub.split(/\s*\|\s*/);
+          if (subParts.length === 2) {
+            const company = subParts[0].trim();
+            const location = subParts[1].trim();
             newPageIfNeeded(LH.italic);
-            doc.text(sl, ML, y);
+            doc.setFont('times', 'italic');
+            doc.text(company, ML, y);
+            doc.text(location, PW - MR, y, { align: 'right' });
             y += LH.italic;
-          });
+          } else {
+            doc.setFont('times', 'italic');
+            const subLines = doc.splitTextToSize(item.sub, CW) as string[];
+            subLines.forEach(sl => {
+              newPageIfNeeded(LH.italic);
+              doc.text(sl, ML, y);
+              y += LH.italic;
+            });
+          }
           rgb(BLACK);
         }
 
@@ -431,7 +443,7 @@ export async function generateResumePdf(resumeText: string): Promise<void> {
         const TW = CW - 18;
 
         doc.setFontSize(FS.body);
-        doc.setFont('helvetica', 'normal');
+        doc.setFont('times', 'normal');
         rgb(BLACK);
 
         const bLines = doc.splitTextToSize(item.text, TW) as string[];
@@ -466,11 +478,11 @@ export async function generateResumePdf(resumeText: string): Promise<void> {
           const label = item.text.slice(0, colonIdx + 1) + ' ';
           const value = item.text.slice(colonIdx + 1).trim();
 
-          doc.setFont('helvetica', 'bold');
+          doc.setFont('times', 'bold');
           rgb(BLACK);
           const lw = doc.getTextWidth(label);
 
-          doc.setFont('helvetica', 'normal');
+          doc.setFont('times', 'normal');
           rgb(DARK);
           const vLines = doc.splitTextToSize(value, CW - lw) as string[];
 
@@ -478,10 +490,10 @@ export async function generateResumePdf(resumeText: string): Promise<void> {
             newPageIfNeeded(LH.body + 2);
             if (vi === 0) {
               // Draw label and first value on same line
-              doc.setFont('helvetica', 'bold');
+              doc.setFont('times', 'bold');
               rgb(BLACK);
               doc.text(label, ML, y);
-              doc.setFont('helvetica', 'normal');
+              doc.setFont('times', 'normal');
               rgb(DARK);
               doc.text(vl, ML + lw, y);
             } else {
@@ -495,7 +507,7 @@ export async function generateResumePdf(resumeText: string): Promise<void> {
           y += 2;
         } else {
           // No colon — plain text row
-          doc.setFont('helvetica', 'normal');
+          doc.setFont('times', 'normal');
           rgb(DARK);
           const tLines = doc.splitTextToSize(item.text, CW) as string[];
           tLines.forEach(tl => {
@@ -513,7 +525,7 @@ export async function generateResumePdf(resumeText: string): Promise<void> {
       // ── GENERIC TEXT ───────────────────────────────────────────────────────
       case 'text': {
         doc.setFontSize(FS.body);
-        doc.setFont('helvetica', 'normal');
+        doc.setFont('times', 'normal');
         rgb(DARK);
         const txLines = doc.splitTextToSize(item.text, CW) as string[];
         txLines.forEach(tl => {

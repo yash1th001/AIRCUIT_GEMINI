@@ -527,6 +527,7 @@ const AnalyzerSection = () => {
               resumeText={resumeText}
               jobDescription={jobDescription}
               results={results}
+              geminiApiKey={geminiApiKey}
             />
             <ResumeChat 
               resumeText={resumeText} 

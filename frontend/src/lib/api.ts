@@ -89,6 +89,25 @@ export async function apiBiasAudit(
   return handleResponse(res, "Bias audit failed");
 }
 
+// Tailor Resume API
+export async function apiTailorResume(
+  resumeText: string,
+  jobDescription: string,
+  geminiApiKey?: string | null,
+  modelName?: string
+) {
+  const res = await apiFetch("/tailor-resume", {
+    method: "POST",
+    body: JSON.stringify({
+      resumeText,
+      jobDescription,
+      geminiApiKey: geminiApiKey || null,
+      modelName: modelName || "gemini-1.5-flash",
+    }),
+  });
+  return handleResponse(res, "Tailoring resume failed");
+}
+
 // Analysis history API
 export async function apiFetchAnalyses(mode?: string, limit: number = 100) {
   const params = new URLSearchParams();

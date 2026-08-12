@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
-import { apiSignUp, apiSignIn, apiGetMe, setToken, clearToken } from '@/lib/api';
+import { apiSignUp, apiSignIn, apiGetMe, setToken, clearToken, apiFetch } from '@/lib/api';
 
 interface AuthUser {
   id: string;
@@ -20,8 +20,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
-  // On mount: check if we have a valid stored token
+  // On mount: pre-warm backend & check if we have a valid stored token
   useEffect(() => {
+    // Fire background ping immediately to wake Render instance before user clicks Sign Up
+    apiFetch("/").catch(() => {});
+
     const initializeAuth = async () => {
       try {
         const token = localStorage.getItem('auth_token');

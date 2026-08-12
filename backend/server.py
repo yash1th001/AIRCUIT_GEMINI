@@ -46,7 +46,7 @@ SECRET_KEY = os.environ.get('JWT_SECRET_KEY', 'aicruit-secret-key-change-in-prod
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_HOURS = 24 * 7  # 7 days
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto", bcrypt__rounds=10)
 bearer_scheme = HTTPBearer(auto_error=False)
 
 # ── Step 2: In-memory result cache ──────────────────────────────────────────
@@ -311,10 +311,11 @@ async def signup(body: UserRegister):
     if existing:
         raise HTTPException(status_code=400, detail="An account with this email already exists")
     user_id = str(uuid.uuid4())
+    password_hash = await asyncio.to_thread(hash_password, body.password)
     user_doc = {
         "_id": user_id,
         "email": email,
-        "password_hash": hash_password(body.password),
+        "password_hash": password_hash,
         "created_at": datetime.utcnow().isoformat(),
     }
     await db.users.insert_one(user_doc)
@@ -326,7 +327,10 @@ async def signup(body: UserRegister):
 async def signin(body: UserLogin):
     email = body.email.lower().strip()
     user = await db.users.find_one({"email": email})
-    if not user or not verify_password(body.password, user["password_hash"]):
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+    is_valid = await asyncio.to_thread(verify_password, body.password, user["password_hash"])
+    if not is_valid:
         raise HTTPException(status_code=401, detail="Invalid email or password")
     token = create_access_token({"sub": user["_id"], "email": email})
     return Token(access_token=token, user={"id": user["_id"], "email": email})
@@ -567,6 +571,87 @@ async def audit_bias(request: BiasAuditRequest):
     except Exception as e:
         logger.error(f"Bias audit error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Bias audit failed: {str(e)}")
+
+# ── Tailor resume request/response models ──────────────────────────────────
+class TailorResumeRequest(BaseModel):
+    resumeText: str
+    jobDescription: str
+    geminiApiKey: Optional[str] = None
+    modelName: Optional[str] = "gemini-2.5-flash"
+
+class TailorResumeResponse(BaseModel):
+    tailoredResumeText: str
+
+@api_router.post("/tailor-resume", response_model=TailorResumeResponse)
+async def tailor_resume(request: TailorResumeRequest):
+    """
+    Tailor the resume text to match the job description using Gemini.
+    Formats the output strictly so it can be parsed by the PDF generator.
+    """
+    try:
+        if not request.geminiApiKey or not request.geminiApiKey.strip():
+            raise HTTPException(status_code=400, detail="Gemini API key is required.")
+
+        api_key = request.geminiApiKey.strip()
+        client = get_client(api_key)
+
+        prompt = f"""You are an expert resume writer. Tailor this resume to match the job description below.
+Keep the resume truthful but align the wording, highlight relevant experience, and focus on the skills requested in the job description.
+
+CRITICAL FORMATTING INSTRUCTIONS for parsing:
+Your output must follow this EXACT plain text format so it can be parsed by our system. Do not use markdown styling (no bold **, no italics *).
+- Line 1: Candidate's Name (e.g. John Doe)
+- Line 2: Contact Info (e.g. email@address.com | (123) 456-7890 | linkedin.com/in/johndoe | github.com/johndoe | City, State)
+- Section Headers: Must be in ALL CAPS on their own line (e.g. PROFESSIONAL SUMMARY, WORK EXPERIENCE, EDUCATION, SKILLS, PROJECTS)
+- Work Experience/Education/Project entries:
+  - Line 1: Job Title / Degree (e.g. Software Engineer) followed by the Date Range (e.g. June 2022 - Present)
+  - Line 2: Company Name / School Name followed by | and then the Location (e.g. Google | Mountain View, CA)
+  - Subsequent lines: Bullet points starting with a bullet character • (e.g. • Developed microservices using Python and Go)
+- Skills section:
+  - Format as category followed by colon and comma-separated values (e.g. Languages: Python, Java, JavaScript)
+
+RESUME:
+{request.resumeText}
+
+JOB DESCRIPTION:
+{request.jobDescription}
+
+Tailored Resume:"""
+
+        # Run the generation using fallback models
+        models_to_try = [request.modelName or "gemini-2.5-flash"] + [m for m in MODEL_FALLBACK_CHAIN if m != request.modelName]
+        last_error = None
+        response_text = ""
+
+        for current_model in models_to_try:
+            try:
+                response = await generate_content_with_retry(
+                    client=client,
+                    model_name=current_model,
+                    prompt=prompt
+                )
+                response_text = response.text
+                break
+            except Exception as e:
+                err_str = str(e)
+                last_error = e
+                is_model_not_found = (
+                    (isinstance(e, ClientError) and getattr(e, "code", None) == 404)
+                    or ("404" in err_str and ("models/" in err_str or "NOT_FOUND" in err_str))
+                )
+                if is_model_not_found:
+                    logger.warning(f"Model '{current_model}' not available for tailoring, trying next fallback...")
+                    continue
+                raise
+
+        if not response_text and last_error:
+            raise last_error
+
+        return TailorResumeResponse(tailoredResumeText=response_text.strip())
+
+    except Exception as e:
+        logger.error(f"Error in tailor-resume endpoint: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Tailoring failed: {str(e)}")
 
 
 # ── Step 11: Analysis history endpoint ─────────────────────────────────────
@@ -935,12 +1020,13 @@ app.include_router(api_router)
 
 @app.on_event("startup")
 async def startup_create_indexes():
-    """Create MongoDB indexes on resume_analyses for fast research queries."""
+    """Create MongoDB indexes for fast research queries and user lookups."""
     try:
+        await db.users.create_index("email", unique=True)
         await db.resume_analyses.create_index("timestamp")
         await db.resume_analyses.create_index("mode")
         await db.resume_analyses.create_index("prompt_version")
-        logger.info("MongoDB indexes created on resume_analyses collection")
+        logger.info("MongoDB indexes created on users and resume_analyses collections")
     except Exception as e:
         logger.error(f"Failed to create indexes: {e}")
 

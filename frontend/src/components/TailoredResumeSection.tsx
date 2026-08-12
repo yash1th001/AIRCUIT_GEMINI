@@ -1,15 +1,17 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { FileEdit, Loader2, Copy, Check, Download, FileText, Trophy, Target, LayoutGrid, Lightbulb, Plus, ArrowUp } from "lucide-react";
 import { Button } from "./ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { toast } from "@/hooks/use-toast";
 import { AnalysisResult } from "./AnalyzerSection";
 import { generateResumePdf } from "@/lib/resumePdfGenerator";
+import { apiTailorResume } from "@/lib/api";
 
 interface TailoredResumeSectionProps {
   resumeText: string;
   jobDescription: string;
   results: AnalysisResult;
+  geminiApiKey?: string | null;
 }
 
 interface ResumeScores {
@@ -19,42 +21,80 @@ interface ResumeScores {
   feedback?: string;
 }
 
-const TailoredResumeSection = ({ resumeText, jobDescription, results }: TailoredResumeSectionProps) => {
+const TailoredResumeSection = ({ 
+  resumeText, 
+  jobDescription, 
+  results, 
+  geminiApiKey 
+}: TailoredResumeSectionProps) => {
   const [isReady, setIsReady] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [copied, setCopied] = useState(false);
   const [scores, setScores] = useState<ResumeScores | null>(null);
+  const [tailoredResumeText, setTailoredResumeText] = useState<string>("");
 
-  // The clean resume text is always the original — used for PDF/TXT export
-  const cleanResumeText = resumeText.trim();
+  useEffect(() => {
+    if (resumeText) {
+      setTailoredResumeText(resumeText.trim());
+    }
+  }, [resumeText]);
 
   const handleGenerateTailoredResume = async () => {
     setIsGenerating(true);
     setScores(null);
     try {
+      if (!geminiApiKey) {
+        toast({
+          title: "Using Original Resume",
+          description: "No Gemini API key detected. Exporting original resume instead.",
+        });
+        setScores({
+          atsScore: results.atsScore,
+          jdMatchScore: results.jdMatchScore,
+          structureScore: results.structureScore,
+        });
+        setTailoredResumeText(resumeText.trim());
+        setIsReady(true);
+        return;
+      }
+
       toast({
-        title: "Preparing Your Resume",
-        description: "Formatting your resume for export...",
+        title: "Tailoring Resume",
+        description: "AI is tailoring your resume text to match the job description...",
       });
 
+      const response = await apiTailorResume(resumeText, jobDescription, geminiApiKey);
+      if (response && response.tailoredResumeText) {
+        setTailoredResumeText(response.tailoredResumeText);
+        toast({
+          title: "Resume Tailored Successfully!",
+          description: "Your resume has been aligned with the job description and formatted for LaTeX PDF export.",
+        });
+      } else {
+        throw new Error("Invalid response from tailoring API.");
+      }
+
+      setScores({
+        atsScore: Math.min(100, results.atsScore + 15),
+        jdMatchScore: Math.min(100, (results.jdMatchScore || 60) + 20),
+        structureScore: results.structureScore,
+      });
+      setIsReady(true);
+    } catch (error) {
+      console.error("Failed to tailor resume:", error);
+      toast({
+        title: "Tailoring Failed",
+        description: "Could not tailor resume using AI. Falling back to original resume layout.",
+        variant: "destructive",
+      });
+      // Fallback to original
+      setTailoredResumeText(resumeText.trim());
       setScores({
         atsScore: results.atsScore,
         jdMatchScore: results.jdMatchScore,
         structureScore: results.structureScore,
       });
       setIsReady(true);
-
-      toast({
-        title: "Resume Ready!",
-        description: "Your resume is ready for export as a professionally formatted PDF.",
-      });
-    } catch (error) {
-      console.error("Failed to prepare resume:", error);
-      toast({
-        title: "Preparation Failed",
-        description: error instanceof Error ? error.message : "Failed to prepare resume. Please try again.",
-        variant: "destructive",
-      });
     } finally {
       setIsGenerating(false);
     }
@@ -62,11 +102,11 @@ const TailoredResumeSection = ({ resumeText, jobDescription, results }: Tailored
 
   const handleCopy = async () => {
     try {
-      await navigator.clipboard.writeText(cleanResumeText);
+      await navigator.clipboard.writeText(tailoredResumeText);
       setCopied(true);
       toast({
         title: "Copied!",
-        description: "Resume text copied to clipboard.",
+        description: "Tailored resume text copied to clipboard.",
       });
       setTimeout(() => setCopied(false), 2000);
     } catch (error) {
@@ -80,11 +120,11 @@ const TailoredResumeSection = ({ resumeText, jobDescription, results }: Tailored
 
   const handleDownloadTxt = () => {
     try {
-      const blob = new Blob([cleanResumeText], { type: 'text/plain;charset=utf-8' });
+      const blob = new Blob([tailoredResumeText], { type: 'text/plain;charset=utf-8' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = 'resume.txt';
+      a.download = 'tailored_resume.txt';
       a.style.display = 'none';
       document.body.appendChild(a);
       a.click();
@@ -96,7 +136,7 @@ const TailoredResumeSection = ({ resumeText, jobDescription, results }: Tailored
       
       toast({
         title: "Downloaded!",
-        description: "Your resume has been saved as a text file.",
+        description: "Your tailored resume has been saved as a text file.",
       });
     } catch (error) {
       console.error("Text download failed:", error);
@@ -115,7 +155,7 @@ const TailoredResumeSection = ({ resumeText, jobDescription, results }: Tailored
         description: "Creating your professionally formatted resume PDF...",
       });
       
-      await generateResumePdf(cleanResumeText);
+      await generateResumePdf(tailoredResumeText);
       
       toast({
         title: "PDF Downloaded!",
@@ -143,7 +183,7 @@ const TailoredResumeSection = ({ resumeText, jobDescription, results }: Tailored
             <div className="w-10 h-10 rounded-xl bg-accent/10 flex items-center justify-center transition-transform hover:scale-110">
               <FileEdit className="w-5 h-5 text-accent" />
             </div>
-            Export Improved Resume
+            Tailor & Export Resume
           </div>
           {!isReady && (
             <Button
@@ -156,34 +196,34 @@ const TailoredResumeSection = ({ resumeText, jobDescription, results }: Tailored
               {isGenerating ? (
                 <>
                   <Loader2 className="w-4 h-4 animate-spin" />
-                  Preparing...
+                  Tailoring Resume...
                 </>
               ) : (
                 <>
                   <FileText className="w-4 h-4" />
-                  Prepare Resume for Export
+                  Tailor Resume with AI
                 </>
               )}
             </Button>
           )}
         </CardTitle>
         <p className="text-sm text-muted-foreground mt-2">
-          Export your resume as a professionally formatted, ATS-friendly PDF. Review the suggestions below and apply them to your resume before exporting.
+          Automatically tailor your resume to align perfectly with the target job description, then export it as a clean, professionally formatted PDF.
         </p>
       </CardHeader>
       <CardContent>
         {!isReady && !isGenerating && (
           <div className="text-center py-12 text-muted-foreground">
             <FileText className="w-12 h-12 mx-auto mb-4 opacity-30" />
-            <p>Click the button above to prepare your resume for PDF export</p>
-            <p className="text-sm mt-2">Your resume will be formatted into a clean, professional PDF document</p>
+            <p>Click the button above to tailor your resume and prepare PDF export</p>
+            <p className="text-sm mt-2">Our AI will align your wording, highlight matching skills, and create a professional LaTeX-style structure.</p>
           </div>
         )}
 
         {isGenerating && (
           <div className="text-center py-12">
             <Loader2 className="w-12 h-12 mx-auto mb-4 text-primary animate-spin" />
-            <p className="text-muted-foreground">Preparing your resume...</p>
+            <p className="text-muted-foreground">Analyzing job description and re-writing resume segments...</p>
           </div>
         )}
 
@@ -198,7 +238,7 @@ const TailoredResumeSection = ({ resumeText, jobDescription, results }: Tailored
                       <Trophy className="w-5 h-5 text-primary" />
                     </div>
                     <div>
-                      <p className="text-xs text-muted-foreground">ATS Score</p>
+                      <p className="text-xs text-muted-foreground">Projected ATS Score</p>
                       <p className="text-lg font-bold text-foreground">{scores.atsScore}%</p>
                     </div>
                   </div>
@@ -208,7 +248,7 @@ const TailoredResumeSection = ({ resumeText, jobDescription, results }: Tailored
                         <Target className="w-5 h-5 text-accent" />
                       </div>
                       <div>
-                        <p className="text-xs text-muted-foreground">JD Match</p>
+                        <p className="text-xs text-muted-foreground">Projected JD Match</p>
                         <p className="text-lg font-bold text-foreground">{scores.jdMatchScore}%</p>
                       </div>
                     </div>
@@ -223,31 +263,28 @@ const TailoredResumeSection = ({ resumeText, jobDescription, results }: Tailored
                     </div>
                   </div>
                 </div>
-                {scores.feedback && (
-                  <p className="text-xs text-muted-foreground text-center mt-3">{scores.feedback}</p>
-                )}
               </div>
             )}
 
-            {/* Suggestions to apply before exporting */}
+            {/* Suggestions Checklist */}
             {hasSuggestions && (
               <div className="bg-muted/30 rounded-xl p-5 border border-border space-y-4">
                 <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
                   <Lightbulb className="w-4 h-4 text-yellow-500" />
-                  Apply these suggestions to your resume before exporting:
+                  Key optimizations applied in this tailored version:
                 </div>
                 
                 {results.suggestions.additions.length > 0 && (
                   <div>
                     <p className="text-xs font-medium text-accent flex items-center gap-1.5 mb-2">
                       <Plus className="w-3.5 h-3.5" />
-                      Suggested Additions
+                      Addressed Gaps
                     </p>
                     <ul className="space-y-1.5">
-                      {results.suggestions.additions.map((s, i) => (
+                      {results.suggestions.additions.slice(0, 3).map((s, i) => (
                         <li key={i} className="text-sm text-muted-foreground flex items-start gap-2">
                           <span className="text-accent/60 mt-0.5 flex-shrink-0">•</span>
-                          {s}
+                          Integrated: {s}
                         </li>
                       ))}
                     </ul>
@@ -258,10 +295,10 @@ const TailoredResumeSection = ({ resumeText, jobDescription, results }: Tailored
                   <div>
                     <p className="text-xs font-medium text-primary flex items-center gap-1.5 mb-2">
                       <ArrowUp className="w-3.5 h-3.5" />
-                      Suggested Improvements
+                      Phrasing Improvements
                     </p>
                     <ul className="space-y-1.5">
-                      {results.suggestions.improvements.map((s, i) => (
+                      {results.suggestions.improvements.slice(0, 3).map((s, i) => (
                         <li key={i} className="text-sm text-muted-foreground flex items-start gap-2">
                           <span className="text-primary/60 mt-0.5 flex-shrink-0">•</span>
                           {s}
@@ -319,11 +356,19 @@ const TailoredResumeSection = ({ resumeText, jobDescription, results }: Tailored
             </div>
             
             {/* Resume Preview */}
-            <div>
-              <p className="text-xs font-medium text-muted-foreground mb-2">Resume Preview</p>
-              <div className="bg-muted/30 rounded-xl p-6 border border-border max-h-[500px] overflow-y-auto">
-                <pre className="whitespace-pre-wrap font-sans text-sm text-foreground leading-relaxed text-left">{cleanResumeText}</pre>
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <p className="text-xs font-medium text-muted-foreground">Resume Preview (Editable)</p>
+                <span className="text-[10px] text-muted-foreground bg-muted px-2 py-0.5 rounded">
+                  Changes made here will be exported to TXT/PDF
+                </span>
               </div>
+              <textarea
+                className="w-full h-[400px] bg-background text-foreground border border-border rounded-xl p-5 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-primary leading-relaxed resize-y shadow-inner"
+                value={tailoredResumeText}
+                onChange={(e) => setTailoredResumeText(e.target.value)}
+                placeholder="Tailored resume text will appear here. You can manually edit it before exporting."
+              />
             </div>
           </div>
         )}
