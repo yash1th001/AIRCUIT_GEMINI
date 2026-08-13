@@ -1,11 +1,18 @@
-import { FileText, Menu } from "lucide-react";
+import { FileText, Menu, LogOut, User, Loader2 } from "lucide-react";
 import { Button } from "./ui/button";
 import { useState, useEffect } from "react";
 import ThemeToggle from "./ThemeToggle";
 import UserMenu from "./auth/UserMenu";
+import { useAuth } from "@/hooks/use-auth";
+import AuthModal from "./auth/AuthModal";
+import ProfileSettingsDialog from "./profile/ProfileSettingsDialog";
+
 const Header = () => {
   const [scrolled, setScrolled] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const { user, isLoading, signOut } = useAuth();
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const [authView, setAuthView] = useState<"login" | "signup">("login");
 
   useEffect(() => {
     const handleScroll = () => {
@@ -32,7 +39,7 @@ const Header = () => {
             <h1 className="font-display text-xl font-bold text-foreground tracking-tight group-hover:text-primary transition-colors">
               AIcruit
             </h1>
-            <p className="text-xs text-muted-foreground">Smart Resume Analysis</p>
+            <p className="text-xs text-muted-foreground hidden sm:block">Smart Resume Analysis</p>
           </div>
         </a>
         
@@ -54,7 +61,10 @@ const Header = () => {
 
         <div className="flex items-center gap-3">
           <ThemeToggle />
-          <UserMenu />
+          
+          <div className="hidden md:block">
+            <UserMenu />
+          </div>
           
           {/* Mobile menu button */}
           <Button 
@@ -85,9 +95,68 @@ const Header = () => {
                 {link.label}
               </a>
             ))}
+            
+            <div className="h-px bg-border my-2" />
+            
+            {/* Mobile Auth Actions */}
+            {isLoading ? (
+              <div className="flex justify-center py-2">
+                <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
+              </div>
+            ) : user ? (
+              <div className="flex flex-col gap-2 px-2 py-1">
+                <div className="text-xs text-muted-foreground px-4 py-2 bg-muted/30 rounded-lg mb-1 truncate">
+                  Signed in as <span className="font-semibold text-foreground">{user.email}</span>
+                </div>
+                <ProfileSettingsDialog />
+                <Button 
+                  variant="ghost" 
+                  size="sm" 
+                  onClick={() => {
+                    signOut();
+                    setMobileMenuOpen(false);
+                  }}
+                  className="w-full justify-start text-destructive hover:text-destructive hover:bg-destructive/10"
+                >
+                  <LogOut className="w-4 h-4 mr-2" />
+                  Sign Out
+                </Button>
+              </div>
+            ) : (
+              <div className="flex flex-col gap-2 px-2 py-1">
+                <Button 
+                  variant="outline" 
+                  onClick={() => {
+                    setAuthView("login");
+                    setIsAuthModalOpen(true);
+                    setMobileMenuOpen(false);
+                  }}
+                  className="w-full justify-center gap-2"
+                >
+                  <User className="w-4 h-4" />
+                  Sign In
+                </Button>
+                <Button 
+                  onClick={() => {
+                    setAuthView("signup");
+                    setIsAuthModalOpen(true);
+                    setMobileMenuOpen(false);
+                  }}
+                  className="w-full justify-center"
+                >
+                  Sign Up
+                </Button>
+              </div>
+            )}
           </nav>
         </div>
       )}
+
+      <AuthModal
+        isOpen={isAuthModalOpen}
+        onClose={() => setIsAuthModalOpen(false)}
+        defaultView={authView}
+      />
     </header>
   );
 };

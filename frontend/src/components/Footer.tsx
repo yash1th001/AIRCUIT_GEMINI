@@ -42,7 +42,7 @@ const Footer = () => {
         <div className="mt-10 pt-6 border-t border-border/20">
           <div className="flex flex-col md:flex-row items-center justify-between gap-4 text-sm text-muted-foreground">
             <p>© {new Date().getFullYear()} AIcruit. All rights reserved.</p>
-            <div className="flex items-center gap-6">
+            <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-2">
               {["Privacy Policy", "Terms of Service", "Contact"].map((link) => (
                 <a 
                   key={link}

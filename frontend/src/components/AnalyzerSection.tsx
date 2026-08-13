@@ -283,7 +283,7 @@ const AnalyzerSection = () => {
   // Show login prompt if not authenticated
   if (!user) {
     return (
-      <section id="analyzer" className="py-16 lg:py-24 relative">
+      <section id="analyzer" className="py-16 lg:py-24 relative overflow-hidden">
         <div className="absolute inset-0 -z-10">
           <div className="absolute top-1/2 left-0 w-72 h-72 bg-primary/5 rounded-full blur-3xl" />
           <div className="absolute bottom-0 right-0 w-96 h-96 bg-accent/5 rounded-full blur-3xl" />
@@ -308,7 +308,7 @@ const AnalyzerSection = () => {
   }
 
   return (
-    <section id="analyzer" className="py-16 lg:py-24 relative">
+    <section id="analyzer" className="py-16 lg:py-24 relative overflow-hidden">
       {/* Background decoration */}
       <div className="absolute inset-0 -z-10">
         <div className="absolute top-1/2 left-0 w-72 h-72 bg-primary/5 rounded-full blur-3xl" />

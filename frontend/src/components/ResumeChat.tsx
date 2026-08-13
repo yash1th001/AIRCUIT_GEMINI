@@ -97,7 +97,7 @@ const ResumeChat = ({ resumeText, jobDescription, analysisResults }: ResumeChatP
   }
 
   return (
-    <Card className="fixed bottom-6 right-6 w-[380px] h-[520px] flex flex-col shadow-elevated border-border z-50 animate-scale-in overflow-hidden">
+    <Card className="fixed bottom-4 right-4 left-4 sm:left-auto sm:bottom-6 sm:right-6 sm:w-[380px] h-[520px] flex flex-col shadow-elevated border-border z-50 animate-scale-in overflow-hidden">
       {/* Header */}
       <div className="flex items-center justify-between p-4 border-b border-border bg-gradient-to-r from-primary/5 to-accent/5">
         <div className="flex items-center gap-3">

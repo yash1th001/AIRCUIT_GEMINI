@@ -217,8 +217,8 @@ const ResultsSection = ({
             {totalAwarded}/{totalMax}
           </span>
         </div>
-        <div className="rounded-xl border border-border overflow-hidden">
-          <table className="w-full text-xs">
+        <div className="rounded-xl border border-border overflow-x-auto">
+          <table className="w-full text-xs min-w-[500px] sm:min-w-0">
             <thead>
               <tr className="bg-muted/50">
                 <th className="text-left p-2 font-medium text-muted-foreground">

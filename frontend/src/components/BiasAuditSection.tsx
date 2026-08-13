@@ -162,8 +162,8 @@ const BiasAuditSection = ({
               </div>
 
               {/* Variants table */}
-              <div className="rounded-xl border border-border overflow-hidden">
-                <table className="w-full text-sm">
+              <div className="rounded-xl border border-border overflow-x-auto">
+                <table className="w-full text-sm min-w-[500px] sm:min-w-0">
                   <thead>
                     <tr className="bg-muted/50">
                       <th className="text-left p-3 font-medium text-muted-foreground">

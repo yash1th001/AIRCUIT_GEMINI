@@ -315,7 +315,7 @@ const TailoredResumeSection = ({
               <p className="text-sm text-muted-foreground">
                 Export your resume as a formatted PDF or plain text file.
               </p>
-              <div className="flex gap-2">
+              <div className="flex flex-wrap gap-2 justify-start sm:justify-end w-full sm:w-auto">
                 <Button
                   variant="outline"
                   size="sm"

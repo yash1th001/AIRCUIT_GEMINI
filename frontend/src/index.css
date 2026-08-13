@@ -109,6 +109,10 @@
     @apply border-border;
   }
 
+  html, body {
+    @apply overflow-x-hidden max-w-full;
+  }
+
   body {
     @apply bg-background text-foreground antialiased;
     font-family: 'Inter', sans-serif;
