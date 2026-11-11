@@ -1,18 +1,18 @@
-import { FileText, Menu, LogOut, User, Loader2 } from "lucide-react";
+import { ArrowUpRight, FileText, Menu, LogOut, Loader2 } from "lucide-react";
+import { Link, useLocation } from "react-router-dom";
 import { Button } from "./ui/button";
 import { useState, useEffect } from "react";
 import ThemeToggle from "./ThemeToggle";
 import UserMenu from "./auth/UserMenu";
 import { useAuth } from "@/hooks/use-auth";
-import AuthModal from "./auth/AuthModal";
 import ProfileSettingsDialog from "./profile/ProfileSettingsDialog";
+import { toast } from "@/hooks/use-toast";
 
 const Header = () => {
   const [scrolled, setScrolled] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const { user, isLoading, signOut } = useAuth();
-  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
-  const [authView, setAuthView] = useState<"login" | "signup">("login");
+  const location = useLocation();
 
   useEffect(() => {
     const handleScroll = () => {
@@ -23,81 +23,107 @@ const Header = () => {
   }, []);
 
   return (
-    <header 
-      className={`w-full sticky top-0 z-50 transition-all duration-300 ${
-        scrolled 
-          ? "bg-card/90 backdrop-blur-lg border-b border-border shadow-card" 
-          : "bg-transparent"
+    <header
+      className={`sticky top-0 z-50 w-full border-b transition-all duration-300 ${
+        scrolled
+          ? "border-border/80 bg-background/85 shadow-card backdrop-blur-xl"
+          : "border-transparent bg-background/70 backdrop-blur-md"
       }`}
     >
-      <div className="container mx-auto px-4 py-4 flex items-center justify-between">
-        <a href="/" className="flex items-center gap-3 group">
-          <div className="w-10 h-10 rounded-xl gradient-hero flex items-center justify-center shadow-card transition-all duration-300 group-hover:shadow-elevated group-hover:scale-105">
-            <FileText className="w-5 h-5 text-primary-foreground transition-transform group-hover:rotate-6" />
+      <div className="container mx-auto flex items-center justify-between px-4 py-3 sm:px-6">
+        {/* Logo */}
+        <Link to="/" className="group flex items-center gap-2.5 min-w-0 shrink-0">
+          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-sm transition-transform duration-200 group-hover:-rotate-3 group-hover:scale-105">
+            <FileText className="h-4 w-4" />
           </div>
-          <div>
-            <h1 className="font-display text-xl font-bold text-foreground tracking-tight group-hover:text-primary transition-colors">
+          <div className="min-w-0">
+            <h1 className="font-display text-lg font-bold tracking-tight text-foreground transition-colors group-hover:text-primary leading-none">
               AIcruit
             </h1>
-            <p className="text-xs text-muted-foreground hidden sm:block">Smart Resume Analysis</p>
+            <p className="hidden text-[10px] font-medium uppercase tracking-widest text-muted-foreground sm:block">
+              Resume intelligence
+            </p>
           </div>
-        </a>
-        
-        <nav className="hidden md:flex items-center gap-8">
+        </Link>
+
+        {/* Desktop nav */}
+        <nav className="hidden items-center gap-1 rounded-full border border-border/80 bg-card/70 p-1 md:flex">
           {[
-            { href: "#analyzer", label: "Analyzer" },
-            { href: "#guide", label: "Resume Guide" },
+            { href: "/", label: "Home" },
+            { href: "/analyze", label: "Analyzer" },
+            ...(user ? [{ href: "/history", label: "History" }] : []),
+            { href: "/guide", label: "Resume Guide" },
           ].map((link) => (
-            <a 
+            <Link
               key={link.href}
-              href={link.href} 
-              className="relative text-sm font-medium text-muted-foreground hover:text-foreground transition-colors group"
+              to={link.href}
+              className={`rounded-full px-4 py-2 text-sm font-medium transition-colors ${
+                location.pathname === link.href
+                  ? "bg-primary/10 text-primary"
+                  : "text-muted-foreground hover:bg-muted hover:text-foreground"
+              }`}
             >
               {link.label}
-              <span className="absolute -bottom-1 left-0 w-0 h-0.5 bg-primary rounded-full transition-all duration-300 group-hover:w-full" />
-            </a>
+            </Link>
           ))}
         </nav>
 
-        <div className="flex items-center gap-3">
+        {/* Right side actions */}
+        <div className="flex items-center gap-2 shrink-0">
           <ThemeToggle />
-          
+
+          {/* Desktop-only: UserMenu + Get started */}
           <div className="hidden md:block">
             <UserMenu />
           </div>
-          
-          {/* Mobile menu button */}
-          <Button 
-            variant="ghost" 
-            size="icon" 
+          <Link
+            to="/analyze"
+            className="hidden items-center gap-1.5 rounded-full bg-foreground px-4 py-2 text-sm font-semibold text-background transition-transform hover:-translate-y-0.5 md:flex"
+          >
+            Get started
+            <ArrowUpRight className="h-4 w-4" />
+          </Link>
+
+          {/* Mobile hamburger — only on < md */}
+          <Button
+            variant="ghost"
+            size="icon"
             className="md:hidden"
             onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+            aria-label={mobileMenuOpen ? "Close menu" : "Open menu"}
+            aria-expanded={mobileMenuOpen}
           >
-            <Menu className="w-5 h-5" />
+            <Menu className="h-5 w-5" />
           </Button>
         </div>
       </div>
 
-      {/* Mobile menu */}
+      {/* Mobile dropdown menu */}
       {mobileMenuOpen && (
-        <div className="md:hidden absolute top-full left-0 right-0 bg-card/95 backdrop-blur-lg border-b border-border shadow-elevated animate-slide-down">
-          <nav className="container mx-auto px-4 py-4 flex flex-col gap-2">
+        <div className="absolute left-0 right-0 top-full border-b border-border bg-card/95 shadow-elevated backdrop-blur-xl md:hidden animate-slide-down">
+          <nav className="container mx-auto px-4 py-4 flex flex-col gap-1">
             {[
-              { href: "#analyzer", label: "Analyzer" },
-              { href: "#guide", label: "Resume Guide" },
+              { href: "/", label: "Home" },
+              { href: "/analyze", label: "Analyzer" },
+              ...(user ? [{ href: "/history", label: "History" }] : []),
+              { href: "/guide", label: "Resume Guide" },
             ].map((link) => (
-              <a 
+              <Link
                 key={link.href}
-                href={link.href} 
-                className="text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 px-4 py-3 rounded-lg transition-all"
+                to={link.href}
+                className={`rounded-lg px-4 py-3 text-sm font-medium transition-all ${
+                  location.pathname === link.href
+                    ? "bg-primary/10 text-primary"
+                    : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+                }`}
                 onClick={() => setMobileMenuOpen(false)}
               >
                 {link.label}
-              </a>
+              </Link>
             ))}
-            
+
             <div className="h-px bg-border my-2" />
-            
+
             {/* Mobile Auth Actions */}
             {isLoading ? (
               <div className="flex justify-center py-2">
@@ -109,12 +135,16 @@ const Header = () => {
                   Signed in as <span className="font-semibold text-foreground">{user.email}</span>
                 </div>
                 <ProfileSettingsDialog />
-                <Button 
-                  variant="ghost" 
-                  size="sm" 
-                  onClick={() => {
-                    signOut();
-                    setMobileMenuOpen(false);
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={async () => {
+                    try {
+                      await signOut();
+                      setMobileMenuOpen(false);
+                    } catch (error) {
+                      toast({ title: "Sign out failed", description: error instanceof Error ? error.message : "Please try again.", variant: "destructive" });
+                    }
                   }}
                   className="w-full justify-start text-destructive hover:text-destructive hover:bg-destructive/10"
                 >
@@ -124,39 +154,25 @@ const Header = () => {
               </div>
             ) : (
               <div className="flex flex-col gap-2 px-2 py-1">
-                <Button 
-                  variant="outline" 
-                  onClick={() => {
-                    setAuthView("login");
-                    setIsAuthModalOpen(true);
-                    setMobileMenuOpen(false);
-                  }}
-                  className="w-full justify-center gap-2"
+                <Link
+                  to="/auth"
+                  onClick={() => setMobileMenuOpen(false)}
+                  className="rounded-lg px-4 py-3 text-sm font-medium text-muted-foreground hover:bg-muted/50 hover:text-foreground"
                 >
-                  <User className="w-4 h-4" />
-                  Sign In
-                </Button>
-                <Button 
-                  onClick={() => {
-                    setAuthView("signup");
-                    setIsAuthModalOpen(true);
-                    setMobileMenuOpen(false);
-                  }}
-                  className="w-full justify-center"
+                  Sign in
+                </Link>
+                <Link
+                  to="/auth?next=%2Fanalyze"
+                  onClick={() => setMobileMenuOpen(false)}
+                  className="rounded-lg bg-primary px-4 py-3 text-center text-sm font-semibold text-primary-foreground"
                 >
-                  Sign Up
-                </Button>
+                  Get started
+                </Link>
               </div>
             )}
           </nav>
         </div>
       )}
-
-      <AuthModal
-        isOpen={isAuthModalOpen}
-        onClose={() => setIsAuthModalOpen(false)}
-        defaultView={authView}
-      />
     </header>
   );
 };
